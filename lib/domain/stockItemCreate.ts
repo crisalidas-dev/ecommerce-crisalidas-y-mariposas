@@ -1,3 +1,4 @@
+import { foldText } from "./textSearch.ts";
 import { z } from "zod";
 import { rpcErrorMessage } from "./stockRecipe.ts";
 
@@ -56,9 +57,6 @@ export interface VariantBaseOption {
   name: string;
 }
 
-function fold(value: string): string {
-  return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase();
-}
 
 /**
  * Bases candidatas para una variante: cada palabra de la búsqueda debe
@@ -70,11 +68,11 @@ export function filterVariantBases(
   query: string,
   limit = 8,
 ): VariantBaseOption[] {
-  const words = fold(query).split(/\s+/).filter(Boolean);
+  const words = foldText(query).split(/\s+/).filter(Boolean);
   if (words.length === 0) return [];
   return options
     .filter((o) => {
-      const haystack = fold(`${o.sku} ${o.name}`);
+      const haystack = foldText(`${o.sku} ${o.name}`);
       return words.every((w) => haystack.includes(w));
     })
     .slice(0, limit);
