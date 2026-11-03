@@ -4,6 +4,7 @@ import {
   IMAGE_BUCKET,
   MAX_IMAGE_BYTES,
   imageObjectPath,
+  imageVersion,
   optionalImageFile,
   storagePathFromPublicUrl,
   storagePathsForUrls,
@@ -35,14 +36,64 @@ describe("validateImageFile", () => {
   });
 });
 
+describe("imageVersion", () => {
+  it("is a short lowercase base36 token", () => {
+    const v = imageVersion(1_762_200_000_000, () => 0.5);
+    assert.match(v, /^[0-9a-z]{13}$/);
+  });
+  it("sorts by time", () => {
+    const earlier = imageVersion(1_762_200_000_000, () => 0.99);
+    const later = imageVersion(1_762_200_000_001, () => 0);
+    assert.ok(earlier < later);
+  });
+  it("differs for two uploads in the same millisecond", () => {
+    assert.notEqual(imageVersion(1_762_200_000_000, () => 0.1), imageVersion(1_762_200_000_000, () => 0.2));
+  });
+});
+
 describe("imageObjectPath", () => {
-  it("builds folder/sku.ext", () => {
-    assert.equal(imageObjectPath("variants", "CRI-001-A", "jpg"), "variants/CRI-001-A.jpg");
+  it("builds folder/sku-version.ext: every upload is a new, immutable object", () => {
+    assert.equal(imageObjectPath("variants", "CRI-001-A", "jpg", "mhk2x9z0abcd"), "variants/CRI-001-A-mhk2x9z0abcd.jpg");
+    assert.equal(imageObjectPath("stock-items", "CM0148", "webp", "0001"), "stock-items/CM0148-0001.webp");
   });
   it("rejects skus that could escape the folder", () => {
-    assert.equal(imageObjectPath("variants", "../x", "jpg"), null);
-    assert.equal(imageObjectPath("variants", "a/b", "jpg"), null);
-    assert.equal(imageObjectPath("variants", "", "jpg"), null);
+    assert.equal(imageObjectPath("variants", "../x", "jpg", "v1"), null);
+    assert.equal(imageObjectPath("variants", "a/b", "jpg", "v1"), null);
+    assert.equal(imageObjectPath("variants", "", "jpg", "v1"), null);
+  });
+  it("rejects a version that is not a plain token", () => {
+    for (const version of ["", "../x", "a/b", "A B", "v.1"]) {
+      assert.equal(imageObjectPath("variants", "CRI-1", "jpg", version), null, version);
+    }
+  });
+});
+
+describe("storagePathFromPublicUrl with legacy and versioned paths", () => {
+  it("recognizes both the legacy sku.ext and the versioned sku-version.ext", () => {
+    assert.equal(
+      storagePathFromPublicUrl(`${BASE}/${IMAGE_BUCKET}/variants/CRI-1-V01.webp`, "variants"),
+      "variants/CRI-1-V01.webp",
+    );
+    assert.equal(
+      storagePathFromPublicUrl(`${BASE}/${IMAGE_BUCKET}/variants/CRI-1-V01-mhk2x9z0abcd.webp`, "variants"),
+      "variants/CRI-1-V01-mhk2x9z0abcd.webp",
+    );
+    assert.equal(
+      storagePathFromPublicUrl(`${BASE}/${IMAGE_BUCKET}/stock-items/CM0148-mhk2x9z0abcd.jpg`, "stock-items"),
+      "stock-items/CM0148-mhk2x9z0abcd.jpg",
+    );
+  });
+  it("rejects foreign URLs and traversal, encoded or not", () => {
+    for (const url of [
+      `https://cdn.example.com/variants/CRI-1-mhk2x9z0abcd.webp`,
+      `${BASE}/otro-bucket/variants/CRI-1-mhk2x9z0abcd.webp`,
+      `${BASE}/${IMAGE_BUCKET}/variants/../stock-items/x.jpg`,
+      `${BASE}/${IMAGE_BUCKET}/variants/..%2Fstock-items%2Fx.jpg`,
+      `${BASE}/${IMAGE_BUCKET}/variants/sub/CRI-1.webp`,
+      `${BASE}/${IMAGE_BUCKET}/variants/..`,
+    ]) {
+      assert.equal(storagePathFromPublicUrl(url, "variants"), null, url);
+    }
   });
 });
 

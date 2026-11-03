@@ -4,6 +4,7 @@ import { createAuthServerClient } from "@/lib/supabase/auth-server";
 import {
   IMAGE_BUCKET,
   imageObjectPath,
+  imageVersion,
   storagePathFromPublicUrl,
   storagePathsForUrls,
   validateImageFile,
@@ -55,15 +56,18 @@ export async function storeImage(target: ImageTarget, file: unknown): Promise<Up
   const row = await loadRow(target);
   if (!row) return { ok: false, error: NOT_FOUND };
 
-  const path = imageObjectPath(target.folder, row.sku, validation.ext);
+  // Ruta nueva en cada subida (ver imageObjectPath): la URL vieja nunca se pisa.
+  const path = imageObjectPath(target.folder, row.sku, validation.ext, imageVersion());
   if (!path) return { ok: false, error: "El SKU no permite guardar una imagen." };
 
   const supabase = createAdminClient();
   const storage = supabase.storage.from(IMAGE_BUCKET);
 
+  // upsert: false porque la ruta es nueva; caché larga porque el objeto no cambia nunca.
   const { error: uploadError } = await storage.upload(path, await file.arrayBuffer(), {
-    upsert: true,
+    upsert: false,
     contentType: file.type,
+    cacheControl: "31536000",
   });
   if (uploadError) {
     return { ok: false, error: `No se pudo subir la imagen: ${uploadError.message}` };
@@ -81,9 +85,9 @@ export async function storeImage(target: ImageTarget, file: unknown): Promise<Up
     return { ok: false, error: `No se pudo guardar la imagen: ${updateError.message}` };
   }
 
-  // Si la extensión anterior era distinta, borra el objeto viejo: si no, queda
-  // un archivo huérfano. Va después de guardar la URL nueva para no dejar la
-  // fila apuntando a un objeto ya borrado si algo falla antes.
+  // Borra el objeto anterior (con rutas versionadas siempre es otro): si no,
+  // queda huérfano. Va después de guardar la URL nueva para no dejar la fila
+  // apuntando a un objeto ya borrado si algo falla antes.
   const previous = storagePathFromPublicUrl(row.image_url, target.folder);
   if (previous && previous !== path) await storage.remove([previous]);
 

@@ -24,10 +24,30 @@ export function optionalImageFile(entry: unknown): File | null {
   return entry instanceof File && entry.size > 0 ? entry : null;
 }
 
-/** Ruta del objeto a partir del SKU de la base. `null` si el SKU podría salirse de la carpeta. */
-export function imageObjectPath(folder: ImageFolder, sku: string, ext: string): string | null {
+/**
+ * Token de versión de una subida: base36 del instante (9 caracteres fijos, así
+ * ordena por fecha) + 4 aleatorios (dos subidas en el mismo milisegundo no
+ * chocan). Solo [0-9a-z].
+ */
+export function imageVersion(now: number = Date.now(), random: () => number = Math.random): string {
+  const time = now.toString(36).padStart(9, "0");
+  const salt = Math.floor(random() * 36 ** 4)
+    .toString(36)
+    .padStart(4, "0");
+  return `${time}${salt}`;
+}
+
+/**
+ * Ruta del objeto: `<carpeta>/<SKU>-<versión>.<ext>`. Cada subida es un objeto
+ * nuevo e inmutable, así la URL cambia al reemplazar la foto y ningún caché
+ * (CDN de Supabase, optimizador de next/image, Meta/WhatsApp) sirve la vieja.
+ * Las rutas antiguas `<SKU>.<ext>` siguen siendo válidas. `null` si el SKU o
+ * la versión podrían salirse de la carpeta.
+ */
+export function imageObjectPath(folder: ImageFolder, sku: string, ext: string, version: string): string | null {
   if (!sku || sku.includes("/") || sku.includes("..")) return null;
-  return `${folder}/${sku}.${ext}`;
+  if (!/^[0-9a-z]+$/.test(version)) return null;
+  return `${folder}/${sku}-${version}.${ext}`;
 }
 
 /**
