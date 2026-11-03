@@ -11,7 +11,7 @@ export default async function NuevoPedidoPage() {
   const [catalog, zones] = await Promise.all([getSaleCatalog(), getDeliveryZones()]);
 
   return (
-    <div className="animate-view-in flex max-w-3xl flex-col gap-6">
+    <div className="animate-view-in flex flex-col gap-6">
       <div className="flex flex-col gap-3">
         <BackLink href="/admin/pedidos">Pedidos</BackLink>
         <div>

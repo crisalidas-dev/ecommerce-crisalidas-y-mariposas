@@ -36,6 +36,7 @@ import {
   inputClass,
   labelClass,
   primaryButtonClass,
+  selectClass,
 } from "../../ui/formClasses";
 import { createPanelSale } from "./actions";
 
@@ -290,13 +291,13 @@ export function NewOrderForm({
     `line:${index}` in fieldErrors || marked.includes(`line:${l.variantSku}`);
 
   return (
-    <form onSubmit={onSubmit} noValidate aria-busy={pending} className="flex flex-col gap-6">
+    <form onSubmit={onSubmit} noValidate aria-busy={pending} className="grid grid-cols-1 gap-6 md:grid-cols-5">
       {summaryItems.length > 0 ? (
         <div
           ref={summaryRef}
           role="alert"
           tabIndex={-1}
-          className="rounded-lg bg-admin-critical-bg px-4 py-3 text-sm text-admin-critical-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-accent"
+          className="rounded-lg bg-admin-critical-bg px-4 py-3 text-sm text-admin-critical-fg focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-accent md:col-span-5"
         >
           <p className="font-semibold">
             {summaryItems.length === 1 ? "Hay 1 campo por corregir" : `Hay ${summaryItems.length} campos por corregir`}
@@ -317,283 +318,428 @@ export function NewOrderForm({
         </div>
       ) : null}
 
-      {/* 1. Productos */}
-      <fieldset className={fieldsetClass}>
-        <legend className="px-1 text-sm font-semibold text-admin-ink">1. Productos</legend>
+      <div className="flex min-w-0 flex-col gap-6 md:col-span-3">
+        <fieldset className={`${fieldsetClass} min-w-0`}>
+          <legend className="px-1 text-sm font-semibold text-admin-ink">Productos</legend>
 
-        <div className="flex flex-col gap-2">
-          <Field id="product-search" label="Buscar producto" error={err("lines")}>
-            <input
-              id="product-search"
-              type="search"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              autoComplete="off"
-              placeholder="Nombre del producto"
-              aria-invalid={invalid("lines")}
-              className={inputClass}
-            />
-          </Field>
-          {search.trim() !== "" ? (
-            <ul className="flex flex-col overflow-hidden rounded-lg border border-admin-border">
-              {results.map((product) => {
-                const stock = product.variants.reduce((sum, v) => sum + v.available, 0);
-                const left = stock - lines.filter((l) => l.productId === product.id).reduce((sum, l) => sum + l.qty, 0);
+          <div className="flex flex-col gap-2">
+            <Field id="product-search" label="Buscar producto" error={err("lines")}>
+              <input
+                id="product-search"
+                type="search"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                autoComplete="off"
+                placeholder="Nombre del producto"
+                aria-invalid={invalid("lines")}
+                className={inputClass}
+              />
+            </Field>
+            {search.trim() !== "" ? (
+              <ul className="flex flex-col overflow-hidden rounded-lg border border-admin-border">
+                {results.map((product) => {
+                  const stock = product.variants.reduce((sum, v) => sum + v.available, 0);
+                  const left = stock - lines.filter((l) => l.productId === product.id).reduce((sum, l) => sum + l.qty, 0);
+                  return (
+                    <li key={product.id} className="border-b border-admin-border last:border-0">
+                      <button
+                        type="button"
+                        disabled={left <= 0}
+                        onClick={() => addProduct(product)}
+                        className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-admin-ink-secondary transition-colors duration-150 hover:bg-admin-surface-sunken focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-admin-accent disabled:opacity-60"
+                      >
+                        <span>{product.name}</span>
+                        <span className="font-admin-mono text-xs text-admin-ink-muted">
+                          {stock === 0 ? "Sin stock" : left <= 0 ? "Todo en el pedido" : `${left} disp.`}
+                        </span>
+                      </button>
+                    </li>
+                  );
+                })}
+                {results.length === 0 ? (
+                  <li className="px-3 py-2 text-sm text-admin-ink-muted">Ningún producto coincide.</li>
+                ) : null}
+              </ul>
+            ) : null}
+          </div>
+
+          {lines.length === 0 ? (
+            <p className="rounded-lg border border-dashed border-admin-border px-3 py-6 text-center text-sm text-admin-ink-muted">
+              Aún no hay productos en el pedido.
+            </p>
+          ) : (
+            <ul className="flex flex-col gap-3">
+              {lines.map((line, index) => {
+                const product = productById.get(line.productId);
+                if (!product) return null;
+                const variant = product.variants.find((v) => v.sku === line.variantSku) ?? product.variants[0];
+                const room = Math.max(variant.available - takenByOthers(variant.sku, line.key), 0);
+                const option = product.options.find((o) => o.name === line.optionName);
+                const bad = lineBad(line, index);
                 return (
-                  <li key={product.id} className="border-b border-admin-border last:border-0">
-                    <button
-                      type="button"
-                      disabled={left <= 0}
-                      onClick={() => addProduct(product)}
-                      className="flex min-h-11 w-full items-center justify-between gap-3 px-3 py-2 text-left text-sm text-admin-ink-secondary transition-colors duration-150 hover:bg-admin-surface-sunken focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-admin-accent disabled:opacity-60"
-                    >
-                      <span>{product.name}</span>
-                      <span className="font-admin-mono text-xs text-admin-ink-muted">
-                        {stock === 0 ? "Sin stock" : left <= 0 ? "Todo en el pedido" : `${left} disp.`}
-                      </span>
-                    </button>
+                  <li
+                    key={line.key}
+                    className={`animate-view-in flex flex-col gap-3 rounded-lg border p-3 ${
+                      bad ? "border-admin-critical-fg" : "border-admin-border"
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-semibold text-admin-ink">{product.name}</p>
+                        <p className="text-xs text-admin-ink-muted">
+                          {formatCop(variant.price)} c/u · {variant.available} disponibles
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
+                        className="min-h-11 rounded-lg px-2.5 text-xs font-medium text-admin-ink-muted transition-colors duration-150 hover:bg-admin-surface-sunken hover:text-admin-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-accent"
+                      >
+                        Quitar
+                      </button>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3 md:grid-cols-12">
+                      {product.variants.length > 1 ? (
+                        <div className="md:col-span-5">
+                          <Field id={`variant-${line.key}`} label="Variante">
+                            <select
+                              id={`variant-${line.key}`}
+                              value={line.variantSku}
+                              onChange={(e) => updateLine(line.key, { variantSku: e.target.value, qty: 1 })}
+                              className={selectClass}
+                            >
+                              {product.variants.map((v) => (
+                                <option key={v.sku} value={v.sku} disabled={v.available === 0}>
+                                  {v.label} — {formatCop(v.price)}
+                                  {v.available === 0 ? " (agotada)" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                      ) : null}
+                      <div className="md:col-span-3">
+                        <Field id={`qty-${line.key}`} label="Cantidad" error={err(`line:${index}`)}>
+                          <input
+                            id={`qty-${line.key}`}
+                            type="number"
+                            inputMode="numeric"
+                            min={1}
+                            max={Math.max(room, 1)}
+                            value={line.qty}
+                            onChange={(e) => {
+                              const raw = Math.floor(Number(e.target.value)) || 1;
+                              updateLine(line.key, { qty: Math.min(Math.max(raw, 1), Math.max(room, 1)) });
+                            }}
+                            aria-invalid={bad || undefined}
+                            className={`${inputClass} font-admin-mono`}
+                          />
+                        </Field>
+                      </div>
+                      {product.options.length > 0 ? (
+                        <div className="md:col-span-4">
+                          <Field id={`option-${line.key}`} label="Adicional">
+                            <select
+                              id={`option-${line.key}`}
+                              value={line.optionName}
+                              onChange={(e) => updateLine(line.key, { optionName: e.target.value, optionQty: 1 })}
+                              className={selectClass}
+                            >
+                              <option value="">Sin adicional</option>
+                              {product.options.map((o) => (
+                                <option key={o.name} value={o.name}>
+                                  {o.name} — {formatCop(o.price)}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                        </div>
+                      ) : null}
+                      {option && option.maxQty > 1 ? (
+                        <div className="md:col-span-3">
+                          <Field id={`option-qty-${line.key}`} label="Cantidad del adicional">
+                            <input
+                              id={`option-qty-${line.key}`}
+                              type="number"
+                              inputMode="numeric"
+                              min={1}
+                              max={option.maxQty}
+                              value={line.optionQty}
+                              onChange={(e) => {
+                                const raw = Math.floor(Number(e.target.value)) || 1;
+                                updateLine(line.key, { optionQty: Math.min(Math.max(raw, 1), option.maxQty) });
+                              }}
+                              className={`${inputClass} font-admin-mono`}
+                            />
+                          </Field>
+                        </div>
+                      ) : null}
+                    </div>
                   </li>
                 );
               })}
-              {results.length === 0 ? (
-                <li className="px-3 py-2 text-sm text-admin-ink-muted">Ningún producto coincide.</li>
-              ) : null}
             </ul>
-          ) : null}
-        </div>
+          )}
+          <StepMessage message={messageFor("productos")} live={summaryItems.length === 0} />
+        </fieldset>
 
-        {lines.length === 0 ? (
-          <p className="text-sm text-admin-ink-muted">Aún no hay productos en el pedido.</p>
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {lines.map((line, index) => {
-              const product = productById.get(line.productId);
-              if (!product) return null;
-              const variant = product.variants.find((v) => v.sku === line.variantSku) ?? product.variants[0];
-              const room = Math.max(variant.available - takenByOthers(variant.sku, line.key), 0);
-              const option = product.options.find((o) => o.name === line.optionName);
-              const bad = lineBad(line, index);
-              return (
-                <li
-                  key={line.key}
-                  className={`animate-view-in flex flex-col gap-3 rounded-lg border p-3 ${
-                    bad ? "border-admin-critical-fg" : "border-admin-border"
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-semibold text-admin-ink">{product.name}</p>
-                      <p className="text-xs text-admin-ink-muted">
-                        {formatCop(variant.price)} c/u · {variant.available} disponibles
-                      </p>
-                    </div>
-                    <button
-                      type="button"
-                      onClick={() => setLines((prev) => prev.filter((l) => l.key !== line.key))}
-                      className="min-h-11 rounded-lg px-2.5 text-xs font-medium text-admin-ink-muted transition-colors duration-150 hover:bg-admin-surface-sunken hover:text-admin-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-accent"
+        <fieldset className={`${fieldsetClass} min-w-0`}>
+          <legend className="px-1 text-sm font-semibold text-admin-ink">Entrega</legend>
+
+          <div role="radiogroup" aria-label="Tipo de entrega" className="flex flex-wrap gap-x-4">
+            {(
+              [
+                ["tienda", "Recoger en tienda"],
+                ["domicilio", "Domicilio"],
+              ] as const
+            ).map(([value, text]) => (
+              <label key={value} className="flex min-h-11 items-center gap-2 text-sm text-admin-ink">
+                <input
+                  type="radio"
+                  name="delivery_method"
+                  value={value}
+                  checked={deliveryMethod === value}
+                  onChange={() => setDeliveryMethod(value)}
+                  className="accent-admin-accent"
+                />
+                {text}
+              </label>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+            {deliveryMethod === "domicilio" ? (
+              <>
+                <div className="animate-view-in md:col-span-5">
+                  <Field id="delivery-zone" label="Zona de domicilio" error={err("delivery_zone")}>
+                    <select
+                      id="delivery-zone"
+                      value={zone}
+                      onChange={(e) => setZone(e.target.value)}
+                      aria-invalid={invalid("delivery_zone")}
+                      className={selectClass}
                     >
-                      Quitar
-                    </button>
-                  </div>
+                      <option value="">Elige la zona</option>
+                      {zones.map((z) => (
+                        <option key={z.number} value={z.number}>
+                          Zona {z.number} — {formatCop(z.value)}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <div className="animate-view-in md:col-span-7">
+                  <Field id="delivery-address" label="Dirección" error={err("delivery_address")}>
+                    <input
+                      id="delivery-address"
+                      value={address}
+                      onChange={(e) => setAddress(e.target.value)}
+                      maxLength={200}
+                      aria-invalid={invalid("delivery_address")}
+                      className={inputClass}
+                    />
+                  </Field>
+                </div>
+              </>
+            ) : null}
+            <div className="md:col-span-5">
+              <Field id="delivery-date" label="Fecha de entrega (opcional)" error={err("desired_delivery_date")}>
+                <input
+                  id="delivery-date"
+                  type="date"
+                  value={date}
+                  onChange={(e) => setDate(e.target.value)}
+                  aria-invalid={invalid("desired_delivery_date")}
+                  className={`${inputClass} font-admin-mono`}
+                />
+              </Field>
+            </div>
+            <div className="md:col-span-7">
+              <Field id="occasion" label="Ocasión (opcional)" error={err("occasion")}>
+                <select
+                  id="occasion"
+                  value={occasion}
+                  onChange={(e) => setOccasion(e.target.value)}
+                  aria-invalid={invalid("occasion")}
+                  className={selectClass}
+                >
+                  <option value="">Sin ocasión</option>
+                  {OCCASIONS.map((o) => (
+                    <option key={o} value={o}>
+                      {o.charAt(0).toUpperCase() + o.slice(1)}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </div>
+          <StepMessage message={messageFor("entrega")} live={summaryItems.length === 0} />
+        </fieldset>
 
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                    {product.variants.length > 1 ? (
-                      <Field id={`variant-${line.key}`} label="Variante">
-                        <select
-                          id={`variant-${line.key}`}
-                          value={line.variantSku}
-                          onChange={(e) => updateLine(line.key, { variantSku: e.target.value, qty: 1 })}
-                          className={inputClass}
-                        >
-                          {product.variants.map((v) => (
-                            <option key={v.sku} value={v.sku} disabled={v.available === 0}>
-                              {v.label} — {formatCop(v.price)}
-                              {v.available === 0 ? " (agotada)" : ""}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                    ) : null}
-                    <Field id={`qty-${line.key}`} label="Cantidad" error={err(`line:${index}`)}>
-                      <input
-                        id={`qty-${line.key}`}
-                        type="number"
-                        inputMode="numeric"
-                        min={1}
-                        max={Math.max(room, 1)}
-                        value={line.qty}
-                        onChange={(e) => {
-                          const raw = Math.floor(Number(e.target.value)) || 1;
-                          updateLine(line.key, { qty: Math.min(Math.max(raw, 1), Math.max(room, 1)) });
-                        }}
-                        aria-invalid={bad || undefined}
-                        className={`${inputClass} font-admin-mono`}
-                      />
-                    </Field>
-                    {product.options.length > 0 ? (
-                      <Field id={`option-${line.key}`} label="Adicional">
-                        <select
-                          id={`option-${line.key}`}
-                          value={line.optionName}
-                          onChange={(e) => updateLine(line.key, { optionName: e.target.value, optionQty: 1 })}
-                          className={inputClass}
-                        >
-                          <option value="">Sin adicional</option>
-                          {product.options.map((o) => (
-                            <option key={o.name} value={o.name}>
-                              {o.name} — {formatCop(o.price)}
-                            </option>
-                          ))}
-                        </select>
-                      </Field>
-                    ) : null}
-                  </div>
+        <fieldset className={`${fieldsetClass} min-w-0`}>
+          <legend className="px-1 text-sm font-semibold text-admin-ink">Comprador y destinatario</legend>
 
-                  {option && option.maxQty > 1 ? (
-                    <div className="max-w-40">
-                      <Field id={`option-qty-${line.key}`} label="Cantidad del adicional">
-                        <input
-                          id={`option-qty-${line.key}`}
-                          type="number"
-                          inputMode="numeric"
-                          min={1}
-                          max={option.maxQty}
-                          value={line.optionQty}
-                          onChange={(e) => {
-                            const raw = Math.floor(Number(e.target.value)) || 1;
-                            updateLine(line.key, { optionQty: Math.min(Math.max(raw, 1), option.maxQty) });
-                          }}
-                          className={`${inputClass} font-admin-mono`}
-                        />
-                      </Field>
-                    </div>
-                  ) : null}
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        <StepMessage message={messageFor("productos")} live={summaryItems.length === 0} />
-      </fieldset>
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+            <div className="md:col-span-5">
+              <Field id="buyer-name" label="Nombre del comprador" error={err("buyer_name")}>
+                <input id="buyer-name" value={details.buyer_name} onChange={(e) => setDetail("buyer_name", e.target.value)} maxLength={150} aria-invalid={invalid("buyer_name")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-3">
+              <Field id="buyer-phone" label="Celular" error={err("buyer_phone")} hint="Entre 7 y 15 dígitos.">
+                <input id="buyer-phone" type="tel" value={details.buyer_phone} onChange={(e) => setDetail("buyer_phone", e.target.value)} aria-invalid={invalid("buyer_phone")} className={`${inputClass} font-admin-mono`} />
+              </Field>
+            </div>
+            <div className="md:col-span-4">
+              <Field id="buyer-email" label="Correo (opcional)" error={err("buyer_email")}>
+                <input id="buyer-email" type="email" value={details.buyer_email} onChange={(e) => setDetail("buyer_email", e.target.value)} maxLength={150} aria-invalid={invalid("buyer_email")} className={inputClass} />
+              </Field>
+            </div>
+          </div>
 
-      {/* 2. Entrega */}
-      <fieldset className={fieldsetClass}>
-        <legend className="px-1 text-sm font-semibold text-admin-ink">2. Entrega</legend>
+          <div className="grid grid-cols-1 gap-4 border-t border-admin-border pt-4 md:grid-cols-12">
+            <div className="md:col-span-5">
+              <Field id="recipient-name" label="Quien recibe (opcional)" error={err("recipient_name")}>
+                <input id="recipient-name" value={details.recipient_name} onChange={(e) => setDetail("recipient_name", e.target.value)} maxLength={150} aria-invalid={invalid("recipient_name")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-3">
+              <Field id="recipient-phone" label="Teléfono (opcional)" error={err("recipient_phone")}>
+                <input id="recipient-phone" type="tel" value={details.recipient_phone} onChange={(e) => setDetail("recipient_phone", e.target.value)} aria-invalid={invalid("recipient_phone")} className={`${inputClass} font-admin-mono`} />
+              </Field>
+            </div>
+            <div className="md:col-span-4">
+              <Field id="may-call" label="¿Se le puede llamar?">
+                <select id="may-call" value={details.may_call_recipient} onChange={(e) => setDetail("may_call_recipient", e.target.value)} className={selectClass}>
+                  <option value="si">Sí</option>
+                  <option value="no">No, puede ser una sorpresa</option>
+                </select>
+              </Field>
+            </div>
+            <div className="md:col-span-3">
+              <Field id="delivery-unit" label="Unidad / Apto (opcional)" error={err("delivery_unit")}>
+                <input id="delivery-unit" value={details.delivery_unit} onChange={(e) => setDetail("delivery_unit", e.target.value)} maxLength={120} aria-invalid={invalid("delivery_unit")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-3">
+              <Field id="building-name" label="Edificio (opcional)" error={err("building_name")}>
+                <input id="building-name" value={details.building_name} onChange={(e) => setDetail("building_name", e.target.value)} maxLength={120} aria-invalid={invalid("building_name")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-3">
+              <Field id="neighborhood" label="Barrio (opcional)" error={err("neighborhood")}>
+                <input id="neighborhood" value={details.neighborhood} onChange={(e) => setDetail("neighborhood", e.target.value)} maxLength={120} aria-invalid={invalid("neighborhood")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-3">
+              <Field id="city" label="Ciudad (opcional)" error={err("city")}>
+                <input id="city" value={details.city} onChange={(e) => setDetail("city", e.target.value)} maxLength={120} aria-invalid={invalid("city")} className={inputClass} />
+              </Field>
+            </div>
+          </div>
+          <StepMessage message={messageFor("datos")} live={summaryItems.length === 0} />
+        </fieldset>
 
-        <div role="radiogroup" aria-label="Tipo de entrega" className="flex flex-wrap gap-4">
-          {(
-            [
-              ["tienda", "Recoger en tienda"],
-              ["domicilio", "Domicilio"],
-            ] as const
-          ).map(([value, text]) => (
-            <label key={value} className="flex min-h-11 items-center gap-2 text-sm text-admin-ink-secondary">
+        <fieldset className={`${fieldsetClass} min-w-0`}>
+          <legend className="px-1 text-sm font-semibold text-admin-ink">Tarjeta y factura</legend>
+
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-12">
+            <div className="md:col-span-6">
+              <Field id="card-from" label="Tarjeta: de (opcional)" error={err("card_from")}>
+                <input id="card-from" value={details.card_from} onChange={(e) => setDetail("card_from", e.target.value)} maxLength={100} aria-invalid={invalid("card_from")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-6">
+              <Field id="card-to" label="Tarjeta: para (opcional)" error={err("card_to")}>
+                <input id="card-to" value={details.card_to} onChange={(e) => setDetail("card_to", e.target.value)} maxLength={100} aria-invalid={invalid("card_to")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-12">
+              <Field id="card-message" label="Mensaje de la tarjeta (opcional)" error={err("card_message")}>
+                <textarea id="card-message" rows={3} value={details.card_message} onChange={(e) => setDetail("card_message", e.target.value)} maxLength={1000} aria-invalid={invalid("card_message")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-8">
+              <Field id="special-notes" label="Observación especial (opcional)" error={err("special_notes")}>
+                <textarea id="special-notes" rows={2} value={details.special_notes} onChange={(e) => setDetail("special_notes", e.target.value)} maxLength={1000} aria-invalid={invalid("special_notes")} className={inputClass} />
+              </Field>
+            </div>
+            <div className="md:col-span-4">
+              <Field id="referral" label="¿Cómo nos conoció? (opcional)" error={err("referral_source")}>
+                <select id="referral" value={details.referral_source} onChange={(e) => setDetail("referral_source", e.target.value)} aria-invalid={invalid("referral_source")} className={selectClass}>
+                  <option value="">Sin dato</option>
+                  {REFERRAL_SOURCES.map((r) => (
+                    <option key={r} value={r}>
+                      {r}
+                    </option>
+                  ))}
+                </select>
+              </Field>
+            </div>
+          </div>
+
+          <div className="flex flex-col gap-4 border-t border-admin-border pt-4">
+            <label className="flex min-h-11 items-center gap-2 text-sm text-admin-ink">
               <input
-                type="radio"
-                name="delivery_method"
-                value={value}
-                checked={deliveryMethod === value}
-                onChange={() => setDeliveryMethod(value)}
+                type="checkbox"
+                checked={details.wants_invoice === "si"}
+                onChange={(e) => setDetail("wants_invoice", e.target.checked ? "si" : "no")}
                 className="accent-admin-accent"
               />
-              {text}
+              El comprador quiere factura electrónica
             </label>
-          ))}
-        </div>
-
-        {deliveryMethod === "domicilio" ? (
-          <div className="grid animate-view-in grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field id="delivery-zone" label="Zona de domicilio" error={err("delivery_zone")}>
-              <select
-                id="delivery-zone"
-                value={zone}
-                onChange={(e) => setZone(e.target.value)}
-                aria-invalid={invalid("delivery_zone")}
-                className={inputClass}
-              >
-                <option value="">Elige la zona</option>
-                {zones.map((z) => (
-                  <option key={z.number} value={z.number}>
-                    Zona {z.number} — {formatCop(z.value)}
-                  </option>
-                ))}
-              </select>
-            </Field>
-            <Field id="delivery-address" label="Dirección" error={err("delivery_address")}>
-              <input
-                id="delivery-address"
-                value={address}
-                onChange={(e) => setAddress(e.target.value)}
-                maxLength={200}
-                aria-invalid={invalid("delivery_address")}
-                className={inputClass}
-              />
-            </Field>
+            {details.wants_invoice === "si" ? (
+              <div className="grid animate-view-in grid-cols-1 gap-4 md:grid-cols-12">
+                <div className="md:col-span-6">
+                  <Field id="invoice-legal-name" label="Razón social (opcional)" error={err("invoice_legal_name")}>
+                    <input id="invoice-legal-name" value={details.invoice_legal_name} onChange={(e) => setDetail("invoice_legal_name", e.target.value)} maxLength={150} aria-invalid={invalid("invoice_legal_name")} className={inputClass} />
+                  </Field>
+                </div>
+                <div className="md:col-span-6">
+                  <Field id="invoice-tax-id" label="NIT / documento (opcional)" error={err("invoice_tax_id")} hint="Solo dígitos; el guion y el dígito de verificación son opcionales.">
+                    <input id="invoice-tax-id" value={details.invoice_tax_id} onChange={(e) => setDetail("invoice_tax_id", e.target.value)} aria-invalid={invalid("invoice_tax_id")} className={`${inputClass} font-admin-mono`} />
+                  </Field>
+                </div>
+                <div className="md:col-span-12">
+                  <Field id="invoice-email" label="Correo de facturación (opcional)" error={err("invoice_email")}>
+                    <input id="invoice-email" type="email" value={details.invoice_email} onChange={(e) => setDetail("invoice_email", e.target.value)} maxLength={150} aria-invalid={invalid("invoice_email")} className={inputClass} />
+                  </Field>
+                </div>
+              </div>
+            ) : null}
           </div>
-        ) : null}
+        </fieldset>
+      </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field id="delivery-date" label="Fecha de entrega (opcional)" error={err("desired_delivery_date")}>
-            <input
-              id="delivery-date"
-              type="date"
-              value={date}
-              onChange={(e) => setDate(e.target.value)}
-              aria-invalid={invalid("desired_delivery_date")}
-              className={`${inputClass} font-admin-mono`}
-            />
-          </Field>
-          <Field id="occasion" label="Ocasión (opcional)" error={err("occasion")}>
-            <select
-              id="occasion"
-              value={occasion}
-              onChange={(e) => setOccasion(e.target.value)}
-              aria-invalid={invalid("occasion")}
-              className={inputClass}
-            >
-              <option value="">Sin ocasión</option>
-              {OCCASIONS.map((o) => (
-                <option key={o} value={o}>
-                  {o.charAt(0).toUpperCase() + o.slice(1)}
-                </option>
-              ))}
-            </select>
-          </Field>
-        </div>
-        <StepMessage message={messageFor("entrega")} live={summaryItems.length === 0} />
-      </fieldset>
+      <fieldset className={`${fieldsetClass} min-w-0 md:sticky md:top-20 md:col-span-2 md:self-start`}>
+        <legend className="px-1 text-sm font-semibold text-admin-ink">Pago</legend>
 
-      {/* 3. Pago */}
-      <fieldset className={fieldsetClass}>
-        <legend className="px-1 text-sm font-semibold text-admin-ink">3. Pago</legend>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field id="payment-source" label="Medio de pago" error={err("payment_source")}>
-            <select
-              id="payment-source"
-              value={paymentSource}
-              onChange={(e) => setPaymentSource(e.target.value as typeof paymentSource)}
-              aria-invalid={invalid("payment_source")}
-              className={inputClass}
-            >
-              {PAYMENT_SOURCES.map((s) => (
-                <option key={s.value} value={s.value}>
-                  {s.label}
-                </option>
-              ))}
-            </select>
-          </Field>
-          <Field id="payment-ref" label="Referencia (opcional)" error={err("payment_ref")}>
-            <input
-              id="payment-ref"
-              value={paymentRef}
-              onChange={(e) => setPaymentRef(e.target.value)}
-              maxLength={100}
-              aria-invalid={invalid("payment_ref")}
-              className={`${inputClass} font-admin-mono`}
-            />
-          </Field>
-        </div>
+        <Field id="payment-source" label="Medio de pago" error={err("payment_source")}>
+          <select
+            id="payment-source"
+            value={paymentSource}
+            onChange={(e) => setPaymentSource(e.target.value as typeof paymentSource)}
+            aria-invalid={invalid("payment_source")}
+            className={selectClass}
+          >
+            {PAYMENT_SOURCES.map((s) => (
+              <option key={s.value} value={s.value}>
+                {s.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field id="payment-ref" label="Referencia (opcional)" error={err("payment_ref")}>
+          <input
+            id="payment-ref"
+            value={paymentRef}
+            onChange={(e) => setPaymentRef(e.target.value)}
+            maxLength={100}
+            aria-invalid={invalid("payment_ref")}
+            className={`${inputClass} font-admin-mono`}
+          />
+        </Field>
 
         <dl className="flex flex-col gap-1 rounded-lg bg-admin-surface-sunken p-3 text-sm text-admin-ink-secondary">
           <div className="flex justify-between">
@@ -618,116 +764,17 @@ export function NewOrderForm({
           </div>
         </dl>
         <StepMessage message={messageFor("pago")} live={summaryItems.length === 0} />
+
+        <button type="submit" disabled={pending} className={`${primaryButtonClass} hidden w-full md:block`}>
+          {pending ? "Registrando…" : "Registrar pedido"}
+        </button>
       </fieldset>
 
-      {/* 4. Comprador y destinatario */}
-      <fieldset className={fieldsetClass}>
-        <legend className="px-1 text-sm font-semibold text-admin-ink">4. Comprador y destinatario</legend>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field id="buyer-name" label="Nombre del comprador" error={err("buyer_name")}>
-            <input id="buyer-name" value={details.buyer_name} onChange={(e) => setDetail("buyer_name", e.target.value)} maxLength={150} aria-invalid={invalid("buyer_name")} className={inputClass} />
-          </Field>
-          <Field id="buyer-phone" label="Celular del comprador" error={err("buyer_phone")} hint="Entre 7 y 15 dígitos.">
-            <input id="buyer-phone" type="tel" value={details.buyer_phone} onChange={(e) => setDetail("buyer_phone", e.target.value)} aria-invalid={invalid("buyer_phone")} className={`${inputClass} font-admin-mono`} />
-          </Field>
-          <Field id="buyer-email" label="Correo (opcional)" error={err("buyer_email")}>
-            <input id="buyer-email" type="email" value={details.buyer_email} onChange={(e) => setDetail("buyer_email", e.target.value)} maxLength={150} aria-invalid={invalid("buyer_email")} className={inputClass} />
-          </Field>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field id="recipient-name" label="Quien recibe (opcional)" error={err("recipient_name")}>
-            <input id="recipient-name" value={details.recipient_name} onChange={(e) => setDetail("recipient_name", e.target.value)} maxLength={150} aria-invalid={invalid("recipient_name")} className={inputClass} />
-          </Field>
-          <Field id="recipient-phone" label="Teléfono de quien recibe (opcional)" error={err("recipient_phone")}>
-            <input id="recipient-phone" type="tel" value={details.recipient_phone} onChange={(e) => setDetail("recipient_phone", e.target.value)} aria-invalid={invalid("recipient_phone")} className={`${inputClass} font-admin-mono`} />
-          </Field>
-          <Field id="may-call" label="¿Se puede llamar a quien recibe?">
-            <select id="may-call" value={details.may_call_recipient} onChange={(e) => setDetail("may_call_recipient", e.target.value)} className={inputClass}>
-              <option value="si">Sí</option>
-              <option value="no">No, puede ser una sorpresa</option>
-            </select>
-          </Field>
-          <Field id="delivery-unit" label="Unidad / Apto (opcional)" error={err("delivery_unit")}>
-            <input id="delivery-unit" value={details.delivery_unit} onChange={(e) => setDetail("delivery_unit", e.target.value)} maxLength={120} aria-invalid={invalid("delivery_unit")} className={inputClass} />
-          </Field>
-          <Field id="building-name" label="Edificio (opcional)" error={err("building_name")}>
-            <input id="building-name" value={details.building_name} onChange={(e) => setDetail("building_name", e.target.value)} maxLength={120} aria-invalid={invalid("building_name")} className={inputClass} />
-          </Field>
-          <Field id="neighborhood" label="Barrio (opcional)" error={err("neighborhood")}>
-            <input id="neighborhood" value={details.neighborhood} onChange={(e) => setDetail("neighborhood", e.target.value)} maxLength={120} aria-invalid={invalid("neighborhood")} className={inputClass} />
-          </Field>
-          <Field id="city" label="Ciudad (opcional)" error={err("city")}>
-            <input id="city" value={details.city} onChange={(e) => setDetail("city", e.target.value)} maxLength={120} aria-invalid={invalid("city")} className={inputClass} />
-          </Field>
-        </div>
-        <StepMessage message={messageFor("datos")} live={summaryItems.length === 0} />
-      </fieldset>
-
-      {/* 5. Tarjeta, factura y cómo nos conoció */}
-      <fieldset className={fieldsetClass}>
-        <legend className="px-1 text-sm font-semibold text-admin-ink">5. Tarjeta, factura y cómo nos conoció</legend>
-
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-          <Field id="card-from" label="Tarjeta: de (opcional)" error={err("card_from")}>
-            <input id="card-from" value={details.card_from} onChange={(e) => setDetail("card_from", e.target.value)} maxLength={100} aria-invalid={invalid("card_from")} className={inputClass} />
-          </Field>
-          <Field id="card-to" label="Tarjeta: para (opcional)" error={err("card_to")}>
-            <input id="card-to" value={details.card_to} onChange={(e) => setDetail("card_to", e.target.value)} maxLength={100} aria-invalid={invalid("card_to")} className={inputClass} />
-          </Field>
-        </div>
-        <Field id="card-message" label="Mensaje de la tarjeta (opcional)" error={err("card_message")}>
-          <textarea id="card-message" rows={3} value={details.card_message} onChange={(e) => setDetail("card_message", e.target.value)} maxLength={1000} aria-invalid={invalid("card_message")} className={inputClass} />
-        </Field>
-        <Field id="special-notes" label="Observación especial (opcional)" error={err("special_notes")}>
-          <textarea id="special-notes" rows={2} value={details.special_notes} onChange={(e) => setDetail("special_notes", e.target.value)} maxLength={1000} aria-invalid={invalid("special_notes")} className={inputClass} />
-        </Field>
-
-        <Field id="referral" label="¿Cómo nos conoció? (opcional)" error={err("referral_source")}>
-          <select id="referral" value={details.referral_source} onChange={(e) => setDetail("referral_source", e.target.value)} aria-invalid={invalid("referral_source")} className={inputClass}>
-            <option value="">Sin dato</option>
-            {REFERRAL_SOURCES.map((r) => (
-              <option key={r} value={r}>
-                {r}
-              </option>
-            ))}
-          </select>
-        </Field>
-
-        <label className="flex min-h-11 items-center gap-2 text-sm text-admin-ink-secondary">
-          <input
-            type="checkbox"
-            checked={details.wants_invoice === "si"}
-            onChange={(e) => setDetail("wants_invoice", e.target.checked ? "si" : "no")}
-            className="accent-admin-accent"
-          />
-          El comprador quiere factura electrónica
-        </label>
-        {details.wants_invoice === "si" ? (
-          <div className="grid animate-view-in grid-cols-1 gap-4 sm:grid-cols-2">
-            <Field id="invoice-legal-name" label="Razón social (opcional)" error={err("invoice_legal_name")}>
-              <input id="invoice-legal-name" value={details.invoice_legal_name} onChange={(e) => setDetail("invoice_legal_name", e.target.value)} maxLength={150} aria-invalid={invalid("invoice_legal_name")} className={inputClass} />
-            </Field>
-            <Field id="invoice-tax-id" label="NIT / documento (opcional)" error={err("invoice_tax_id")} hint="Solo dígitos; el guion y el dígito de verificación son opcionales.">
-              <input id="invoice-tax-id" value={details.invoice_tax_id} onChange={(e) => setDetail("invoice_tax_id", e.target.value)} aria-invalid={invalid("invoice_tax_id")} className={`${inputClass} font-admin-mono`} />
-            </Field>
-            <Field id="invoice-email" label="Correo de facturación (opcional)" error={err("invoice_email")}>
-              <input id="invoice-email" type="email" value={details.invoice_email} onChange={(e) => setDetail("invoice_email", e.target.value)} maxLength={150} aria-invalid={invalid("invoice_email")} className={inputClass} />
-            </Field>
-          </div>
-        ) : null}
-      </fieldset>
-
-      <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 rounded-lg border border-admin-border bg-admin-surface-raised p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] sm:static sm:border-0 sm:bg-transparent sm:p-0">
+      <div className="sticky bottom-0 z-10 flex items-center justify-between gap-4 rounded-lg border border-admin-border bg-admin-surface-raised p-3 pb-[calc(0.75rem+env(safe-area-inset-bottom))] md:hidden">
         <p className="text-sm text-admin-ink-secondary">
           Total: <span className="font-admin-mono font-semibold text-admin-ink">{formatCop(totals.total)}</span>
         </p>
-        <button
-          type="submit"
-          disabled={pending}
-          className={primaryButtonClass}
-        >
+        <button type="submit" disabled={pending} className={primaryButtonClass}>
           {pending ? "Registrando…" : "Registrar pedido"}
         </button>
       </div>
