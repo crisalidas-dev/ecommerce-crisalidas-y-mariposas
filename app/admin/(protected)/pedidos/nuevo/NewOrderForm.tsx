@@ -26,6 +26,7 @@ import {
   type DetailKey,
   type FormLine,
   type Paso,
+  type PaymentSource,
   type SaleErrorView,
 } from "@/lib/domain/panelSale";
 import { buildErrorSummary } from "../../ui/errorSummary";
@@ -165,7 +166,7 @@ export function NewOrderForm({
   const [date, setDate] = useState("");
   const [occasion, setOccasion] = useState("");
 
-  const [paymentSource, setPaymentSource] = useState<"transferencia" | "mercadopago">("transferencia");
+  const [paymentSource, setPaymentSource] = useState<PaymentSource>("transferencia");
   const [paymentRef, setPaymentRef] = useState("");
 
   const [details, setDetails] = useState<Details>(EMPTY_DETAILS);

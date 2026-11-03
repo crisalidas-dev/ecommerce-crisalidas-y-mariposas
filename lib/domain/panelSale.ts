@@ -25,7 +25,11 @@ export const OCCASIONS = [
 export const PAYMENT_SOURCES = [
   { value: "transferencia", label: "Transferencia" },
   { value: "mercadopago", label: "Mercado Pago" },
+  // Panel only: the WhatsApp assistant never offers cash (migration 045).
+  { value: "efectivo", label: "Efectivo" },
 ] as const;
+
+export type PaymentSource = (typeof PAYMENT_SOURCES)[number]["value"];
 
 export const REFERRAL_SOURCES = ["Instagram", "Facebook", "Un conocido", "Google", "Otro"] as const;
 
@@ -85,7 +89,7 @@ export interface PanelSaleInput {
   deliveryAddress: string;
   desiredDeliveryDate: string;
   occasion: string;
-  paymentSource: "transferencia" | "mercadopago";
+  paymentSource: PaymentSource;
   paymentRef: string;
   details: Record<DetailKey, string>;
 }
@@ -178,7 +182,7 @@ export function validatePanelSale(raw: unknown): ValidationResult {
 
   // Pago
   const paymentSource = str(raw.paymentSource);
-  if (paymentSource !== "transferencia" && paymentSource !== "mercadopago") {
+  if (!PAYMENT_SOURCES.some((s) => s.value === paymentSource)) {
     errors.payment_source = "Elige el medio de pago.";
   }
   const paymentRef = str(raw.paymentRef);

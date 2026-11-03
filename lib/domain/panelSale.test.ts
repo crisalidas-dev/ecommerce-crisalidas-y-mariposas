@@ -71,6 +71,14 @@ describe("validatePanelSale", () => {
     }
   });
 
+  it("accepts every panel payment source, including cash", () => {
+    for (const paymentSource of ["transferencia", "mercadopago", "efectivo"]) {
+      const r = validatePanelSale(validInput({ paymentSource }));
+      assert.equal(r.ok, true, paymentSource);
+      if (r.ok) assert.equal(r.value.paymentSource, paymentSource);
+    }
+  });
+
   it("requires at least one line and a positive integer quantity", () => {
     const none = validatePanelSale(validInput({ lines: [] }));
     assert.equal(none.ok === false && none.errors.lines !== undefined, true);
@@ -93,7 +101,7 @@ describe("validatePanelSale", () => {
       validInput({
         desiredDeliveryDate: "2026-02-31",
         occasion: "otra",
-        paymentSource: "efectivo",
+        paymentSource: "cheque",
         details: { buyer_name: " ", buyer_phone: "123" },
       }),
     );
