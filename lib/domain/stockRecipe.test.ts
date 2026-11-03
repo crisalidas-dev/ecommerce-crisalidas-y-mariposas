@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   computeRecipeAvailability,
   rpcErrorMessage,
+  postgrestErrorMessage,
   validateRecipeRows,
   type ItemAvailability,
 } from "./stockRecipe.ts";
@@ -94,9 +95,45 @@ describe("rpcErrorMessage", () => {
       assert.doesNotMatch(rpcErrorMessage(code), /No se pudo completar/, code);
     }
   });
+  it("traduce los códigos de generación de SKU y nombres de variante", () => {
+    for (const code of [
+      "VARIANTE_SIN_NOMBRE",
+      "NOMBRE_VARIANTE_DUPLICADO",
+      "NOMBRE_VARIANTE_LARGO",
+      "SIN_VARIANTE_POR_NOMBRAR",
+      "ATRIBUTOS_INVALIDOS",
+      "STOCK_INVALIDO",
+      "PRODUCTO_NO_EXISTE",
+      "VARIANTES_AGOTADAS",
+      "NOMBRE_REQUERIDO",
+      "PRECIO_INVALIDO",
+      "LINEA_NO_EXISTE",
+      "LINEA_INACTIVA",
+      "MARCA_INVALIDA",
+      "NOMBRE_SIN_CARACTERES_VALIDOS",
+      "SKU_AGOTADO",
+    ]) {
+      assert.doesNotMatch(rpcErrorMessage(code), /No se pudo completar/, code);
+    }
+  });
   it("usa el mensaje de respaldo o uno genérico para códigos desconocidos", () => {
     assert.equal(rpcErrorMessage("RARO", "del servidor"), "del servidor");
     assert.match(rpcErrorMessage("RARO"), /No se pudo/);
     assert.match(rpcErrorMessage(undefined), /No se pudo/);
+  });
+});
+
+describe("postgrestErrorMessage", () => {
+  it("traduce un P0001 de trigger por su código", () => {
+    assert.match(
+      postgrestErrorMessage({ code: "P0001", message: "VARIANTE_SIN_NOMBRE", details: "Sin nombre: X." }),
+      /nombre/i,
+    );
+  });
+  it("traduce una violación única de línea", () => {
+    assert.match(postgrestErrorMessage({ code: "23505", message: "dup" }), /código/i);
+  });
+  it("cae al mensaje genérico", () => {
+    assert.match(postgrestErrorMessage({ code: "XX", message: "boom" }), /No se pudo/);
   });
 });

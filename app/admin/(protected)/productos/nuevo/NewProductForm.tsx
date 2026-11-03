@@ -1,55 +1,43 @@
 "use client";
 
 import { useActionState, useState } from "react";
+import { activeLinesOfBrand, type ProductLine } from "@/lib/domain/productLine";
+import { VARIANT_NAME_MAX, productSkuPreview, variantNameError, variantSkuPreview } from "@/lib/domain/sku";
 import { ActionStatus } from "../../ui/ActionStatus";
 import { fieldsetClass, helpTextClass, inputClass, labelClass, primaryButtonClass, selectClass } from "../../ui/formClasses";
 import { PhotoPicker } from "../../ui/PhotoPicker";
 import { createProduct, type FormState } from "../actions";
 import { CRISALIDAS_COLLECTIONS, PRODUCT_TYPES } from "../productTypes";
-
-function slugCode(value: string, maxLength: number): string {
-  return value
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]/g, "")
-    .slice(0, maxLength);
-}
+import { SkuHelpButton } from "../SkuHelpButton";
+import { LineSelector, NEW_LINE } from "./LineSelector";
 
 const initialState: FormState = { error: null };
 
 /**
- * Sugerencia de SKU en vivo (plan §7) — puramente client-side, no reproduce
- * la abreviatura humana exacta de los SKU ya cargados. Editable en todo
- * momento; la unicidad real se valida en el servidor al enviar.
+ * El SKU lo genera la base de datos; aquí solo se muestra una vista previa en
+ * vivo (la final puede llevar `-2` si el nombre ya existe en la línea).
  */
-export function NewProductForm() {
+export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }) {
   const [state, formAction, pending] = useActionState(createProduct, initialState);
 
   const [brand, setBrand] = useState("crisalidas");
-  const [tipo, setTipo] = useState("");
+  const [lines, setLines] = useState(initialLines);
+  const [lineChoice, setLineChoice] = useState("");
   const [name, setName] = useState("");
-  const [attributeValue, setAttributeValue] = useState("");
   // Todos los campos son controlados: React reinicia los no controlados tras la
-  // acción aunque devuelva un error (p. ej. SKU duplicado) y se perdería lo escrito.
+  // acción aunque devuelva un error y se perdería lo escrito.
+  const [attributeValue, setAttributeValue] = useState("");
   const [description, setDescription] = useState("");
   const [category, setCategory] = useState("");
   const [basePrice, setBasePrice] = useState("");
   const [attributeKey, setAttributeKey] = useState("");
   const [stockQty, setStockQty] = useState("0");
 
-  const [skuTouched, setSkuTouched] = useState(false);
-  const [variantSkuTouched, setVariantSkuTouched] = useState(false);
-  const [sku, setSku] = useState("");
-  const [variantSku, setVariantSku] = useState("");
-
-  const suggestedSku = `${PRODUCT_TYPES.find((t) => t.value === brand)?.skuPrefix ?? ""}-${slugCode(tipo, 3)}-${slugCode(name, 12)}`;
-  const suggestedVariantSku = attributeValue
-    ? `${sku || suggestedSku}-${slugCode(attributeValue, 2)}`
-    : `${sku || suggestedSku}-STD`;
-
-  const displaySku = skuTouched ? sku : suggestedSku;
-  const displayVariantSku = variantSkuTouched ? variantSku : suggestedVariantSku;
+  const brandLines = activeLinesOfBrand(lines, brand);
+  const line = brandLines.find((l) => l.id === lineChoice) ?? null;
+  const productSku = productSkuPreview(brand, line?.code ?? "", name);
+  const variantSku = variantSkuPreview(productSku);
+  const valueError = variantNameError(attributeValue);
 
   return (
     <form action={formAction} className="grid grid-cols-1 gap-6 md:grid-cols-5">
@@ -65,7 +53,10 @@ export function NewProductForm() {
               id="brand"
               name="brand"
               value={brand}
-              onChange={(e) => setBrand(e.target.value)}
+              onChange={(e) => {
+                setBrand(e.target.value);
+                setLineChoice("");
+              }}
               className={selectClass}
             >
               {PRODUCT_TYPES.map((b) => (
@@ -98,26 +89,21 @@ export function NewProductForm() {
             </div>
           ) : null}
 
-          <div className="flex flex-col gap-1 md:col-span-4">
-            <label htmlFor="tipo" className={labelClass}>
-              Línea
-            </label>
-            <input
-              id="tipo"
-              name="tipo"
-              value={tipo}
-              onChange={(e) => setTipo(e.target.value)}
-              maxLength={3}
-              required
-              aria-describedby="tipo-help"
-              className={`${inputClass} uppercase`}
+          <div className="md:col-span-12">
+            <LineSelector
+              brand={brand}
+              lines={brandLines}
+              value={lineChoice}
+              onChange={setLineChoice}
+              onCreated={(created) => {
+                setLines((prev) => [...prev, created]);
+                setLineChoice(created.id);
+              }}
             />
-            <p id="tipo-help" className={helpTextClass}>
-              ej. ARR, TER, COL — 3 letras
-            </p>
+            <input type="hidden" name="lineId" value={lineChoice === NEW_LINE ? "" : lineChoice} />
           </div>
 
-          <div className="flex flex-col gap-1 md:col-span-8">
+          <div className="flex flex-col gap-1 md:col-span-6">
             <label htmlFor="name" className={labelClass}>
               Nombre
             </label>
@@ -132,24 +118,19 @@ export function NewProductForm() {
           </div>
 
           <div className="flex flex-col gap-1 md:col-span-6">
-            <label htmlFor="sku" className={labelClass}>
-              SKU de producto
-            </label>
-            <input
-              id="sku"
-              name="sku"
-              value={displaySku}
-              onChange={(e) => {
-                setSkuTouched(true);
-                setSku(e.target.value.toUpperCase());
-              }}
-              required
-              aria-describedby="sku-help"
-              className={`${inputClass} font-admin-mono uppercase`}
-            />
-            <p id="sku-help" className={helpTextClass}>
-              Sugerido, editable
+            <p className={labelClass}>
+              SKU que se asignará
             </p>
+            <div className="flex min-h-11 items-center gap-2">
+              <output
+                aria-live="polite"
+                className="font-admin-mono text-sm font-semibold text-admin-ink"
+              >
+                {productSku ?? "—"}
+              </output>
+              <SkuHelpButton brand={brand} lineCode={line?.code} name={name} />
+            </div>
+            <p className={helpTextClass}>Lo genera el sistema. Si ya existe, se agrega -2.</p>
           </div>
 
           <div className="flex flex-col gap-1 md:col-span-6">
@@ -215,32 +196,20 @@ export function NewProductForm() {
               name="attributeValue"
               value={attributeValue}
               onChange={(e) => setAttributeValue(e.target.value)}
+              maxLength={VARIANT_NAME_MAX}
               aria-describedby="attributeValue-help"
+              aria-invalid={valueError ? true : undefined}
               className={inputClass}
             />
             <p id="attributeValue-help" className={helpTextClass}>
-              ej. blanco
+              ej. blanco · es el nombre que ve el cliente en WhatsApp (máx. {VARIANT_NAME_MAX})
             </p>
           </div>
           <div className="flex flex-col gap-1">
-            <label htmlFor="variantSku" className={labelClass}>
-              SKU de variante
-            </label>
-            <input
-              id="variantSku"
-              name="variantSku"
-              value={displayVariantSku}
-              onChange={(e) => {
-                setVariantSkuTouched(true);
-                setVariantSku(e.target.value.toUpperCase());
-              }}
-              required
-              aria-describedby="variantSku-help"
-              className={`${inputClass} font-admin-mono uppercase`}
-            />
-            <p id="variantSku-help" className={helpTextClass}>
-              Sugerido, editable
-            </p>
+            <p className={labelClass}>SKU de la variante</p>
+            <output aria-live="polite" className="flex min-h-11 items-center font-admin-mono text-sm font-semibold text-admin-ink">
+              {variantSku ?? "—"}
+            </output>
           </div>
 
           <div className="flex flex-col gap-1">
@@ -268,7 +237,7 @@ export function NewProductForm() {
       <div className="flex flex-col gap-4 md:col-span-5">
         <ActionStatus message={state.error ? { tone: "error", text: state.error } : null} />
 
-        <button type="submit" disabled={pending} className={`${primaryButtonClass} w-fit`}>
+        <button type="submit" disabled={pending || !line || Boolean(valueError)} className={`${primaryButtonClass} w-fit`}>
           {pending ? "Creando..." : "Crear producto"}
         </button>
       </div>

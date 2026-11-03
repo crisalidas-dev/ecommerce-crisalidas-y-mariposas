@@ -4,10 +4,11 @@ import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import { rpcErrorMessage } from "@/lib/domain/stockRecipe";
+import { postgrestErrorMessage, rpcErrorMessage } from "@/lib/domain/stockRecipe";
 import { clearImage, storeImage } from "@/lib/admin/imageStorage";
 import { optionalImageFile, validateImageFile } from "@/lib/domain/imageUpload";
-import { isProductSkuTaken, isVariantSkuTaken, resolveVariantSku } from "@/lib/domain/sku";
+import { parseNewLineInput, type ProductLine } from "@/lib/domain/productLine";
+import { variantNameError } from "@/lib/domain/sku";
 
 /** Techos de precio de Crisálidas (spec 001 §4.1) — advertencia, no bloqueo
  * (spec 002 §3.4.3): no hay CHECK en la base, así que tampoco lo hay aquí. */
@@ -21,17 +22,37 @@ const CRISALIDAS_PRICE_CEILING: Record<string, number> = {
 export type FormState = { error: string | null; warning?: string | null };
 
 const createProductSchema = z.object({
-  brand: z.enum(["crisalidas", "complementos"]),
-  sku: z.string().trim().min(3).max(40),
-  name: z.string().trim().min(1),
+  lineId: z.string().uuid("Elige la línea del producto."),
+  name: z.string().trim().min(1, "El nombre del producto es obligatorio."),
   description: z.string().trim().optional(),
   category: z.string().trim().optional(),
   basePrice: z.coerce.number().int().nonnegative(),
-  variantSku: z.string().trim().min(3).max(60),
   attributeKey: z.string().trim().optional(),
   attributeValue: z.string().trim().optional(),
   stockQty: z.coerce.number().int().nonnegative(),
 });
+
+type RpcResult = { ok?: boolean; error?: string; mensaje?: string } | null;
+
+export async function createProductLine(input: {
+  brand: string;
+  name: string;
+  code: string;
+}): Promise<{ ok: true; line: ProductLine } | { ok: false; error: string }> {
+  const parsed = parseNewLineInput(input);
+  if (!parsed.ok) return parsed;
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("product_lines")
+    .insert(parsed.data)
+    .select("id, brand, code, name, is_active")
+    .single();
+  if (error) return { ok: false, error: postgrestErrorMessage(error) };
+
+  revalidatePath("/admin/productos/nuevo");
+  return { ok: true, line: data };
+}
 
 export async function createProduct(_prev: FormState, formData: FormData): Promise<FormState> {
   const parsed = createProductSchema.safeParse(Object.fromEntries(formData));
@@ -40,12 +61,10 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
   }
   const input = parsed.data;
 
-  if (await isProductSkuTaken(input.sku)) {
-    return { error: `El SKU de producto "${input.sku}" ya existe.` };
-  }
-  if (await isVariantSkuTaken(input.variantSku)) {
-    return { error: `El SKU de variante "${input.variantSku}" ya existe.` };
-  }
+  const attributes =
+    input.attributeKey && input.attributeValue ? { [input.attributeKey]: input.attributeValue } : {};
+  const nameError = variantNameError(input.attributeValue ?? "");
+  if (nameError) return { error: nameError };
 
   // La foto es opcional; se valida antes de crear nada para no dejar un producto a medias.
   const photo = optionalImageFile(formData.get("photo"));
@@ -54,64 +73,39 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
     if (!check.ok) return { error: check.error };
   }
 
+  const supabase = createAdminClient();
+
+  // La base genera los SKU y crea producto + primera variante en una transacción.
+  const { data, error } = await supabase.rpc("create_product_with_variant", {
+    p_line_id: input.lineId,
+    p_name: input.name,
+    p_base_price: input.basePrice,
+    p_description: input.description || null,
+    p_category: input.category || null,
+    p_attributes: attributes,
+    p_stock_qty: input.stockQty,
+  });
+  const result = data as
+    | (RpcResult & { product_sku?: string; brand?: string; variant_id?: string })
+    | null;
+
+  if (error || !result?.ok || !result.product_sku || !result.variant_id) {
+    return { error: `No se pudo crear el producto: ${rpcErrorMessage(result?.error, result?.mensaje ?? error?.message)}` };
+  }
+
   let warning: string | null = null;
-  if (input.brand === "crisalidas" && input.category) {
+  if (result.brand === "crisalidas" && input.category) {
     const ceiling = CRISALIDAS_PRICE_CEILING[input.category];
     if (ceiling && input.basePrice > ceiling) {
       warning = `El precio supera el techo de "${input.category}" (${ceiling.toLocaleString("es-CO")} COP) — se guardó igual.`;
     }
   }
 
-  const supabase = createAdminClient();
-
-  const { data: product, error: productError } = await supabase
-    .from("products")
-    .insert({
-      sku: input.sku,
-      name: input.name,
-      brand: input.brand,
-      description: input.description || null,
-      category: input.brand === "crisalidas" ? input.category || null : null,
-      base_price: input.basePrice,
-    })
-    .select("id, sku")
-    .single();
-
-  if (productError) {
-    return { error: `No se pudo crear el producto: ${productError.message}` };
-  }
-
-  const attributes =
-    input.attributeKey && input.attributeValue ? { [input.attributeKey]: input.attributeValue } : {};
-
-  const { data: rpcData, error: rpcError } = await supabase.rpc("create_variant_with_stock", {
-    p_product: product.id,
-    p_sku: input.variantSku,
-    p_attributes: attributes,
-    p_stock_qty: input.stockQty,
-  });
-  const rpcResult = rpcData as { ok?: boolean; error?: string; mensaje?: string } | null;
-
-  if (rpcError || !rpcResult?.ok) {
-    // El producto no debe quedar huérfano sin ninguna variante.
-    await supabase.from("products").delete().eq("id", product.id);
-    return {
-      error: `No se pudo crear la variante inicial: ${rpcErrorMessage(rpcResult?.error, rpcResult?.mensaje ?? rpcError?.message)}`,
-    };
-  }
-
   // Si la foto falla, el producto ya existe: no se revierte y la ficha avisa con `?foto=error`.
   let photoFailed = false;
   if (photo) {
-    const { data: variant } = await supabase
-      .from("product_variants")
-      .select("id")
-      .eq("sku", input.variantSku)
-      .maybeSingle();
-    const res = variant
-      ? await storeImage({ table: "product_variants", folder: "variants", id: variant.id }, photo)
-      : null;
-    photoFailed = !res?.ok;
+    const res = await storeImage({ table: "product_variants", folder: "variants", id: result.variant_id }, photo);
+    photoFailed = !res.ok;
   }
 
   revalidatePath("/admin/productos");
@@ -120,7 +114,7 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
   if (warning) query.set("warning", warning);
   if (photoFailed) query.set("foto", "error");
   const qs = query.toString();
-  redirect(`/admin/productos/${product.sku}${qs ? `?${qs}` : ""}`);
+  redirect(`/admin/productos/${result.product_sku}${qs ? `?${qs}` : ""}`);
 }
 
 export async function setProductPublished(productId: string, published: boolean) {
@@ -133,22 +127,29 @@ export async function setProductPublished(productId: string, published: boolean)
   revalidatePath("/admin/productos");
 }
 
-export async function setVariantActive(variantId: string, active: boolean) {
+export async function setVariantActive(
+  variantId: string,
+  active: boolean,
+): Promise<{ ok: true } | { ok: false; error: string }> {
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("product_variants")
     .update({ is_active: active })
     .eq("id", variantId);
-  if (error) throw error;
+  // Reactivar puede romper las reglas de nombre de variante (trigger P0001).
+  if (error) return { ok: false, error: postgrestErrorMessage(error) };
   revalidatePath("/admin/productos");
+  return { ok: true };
 }
 
 const createVariantSchema = z.object({
   productId: z.string().uuid(),
-  productSku: z.string(),
   attributeKey: z.string().trim().optional(),
   attributeValue: z.string().trim().optional(),
   stockQty: z.coerce.number().int().nonnegative(),
+  // Solo cuando la única variante activa no tiene nombre y hay que nombrarla.
+  unnamedAttributeKey: z.string().trim().optional(),
+  unnamedAttributeValue: z.string().trim().optional(),
 });
 
 export async function createVariant(
@@ -160,31 +161,35 @@ export async function createVariant(
   }
   const input = parsed.data;
 
-  const { sku, conflict } = await resolveVariantSku(input.productSku, input.attributeValue || null);
-  if (conflict) {
-    return {
-      ok: false,
-      error: `No se encontró un SKU disponible a partir de "${input.attributeValue}". Ajusta el atributo.`,
-    };
+  for (const value of [input.attributeValue, input.unnamedAttributeValue]) {
+    const nameError = variantNameError(value ?? "");
+    if (nameError) return { ok: false, error: nameError };
   }
 
   const attributes =
     input.attributeKey && input.attributeValue ? { [input.attributeKey]: input.attributeValue } : {};
+  const unnamed =
+    input.unnamedAttributeKey || input.unnamedAttributeValue
+      ? { [input.unnamedAttributeKey ?? ""]: input.unnamedAttributeValue ?? "" }
+      : null;
+  if (unnamed && (!input.unnamedAttributeKey || !input.unnamedAttributeValue)) {
+    return { ok: false, error: "Indica atributo y valor para nombrar la variante existente." };
+  }
 
   const supabase = createAdminClient();
   const { data, error } = await supabase.rpc("create_variant_with_stock", {
     p_product: input.productId,
-    p_sku: sku,
     p_attributes: attributes,
     p_stock_qty: input.stockQty,
+    p_unnamed_variant_attributes: unnamed,
   });
-  const result = data as { ok?: boolean; error?: string; mensaje?: string } | null;
-  if (error || !result?.ok) {
+  const result = data as (RpcResult & { sku?: string }) | null;
+  if (error || !result?.ok || !result.sku) {
     return { ok: false, error: rpcErrorMessage(result?.error, result?.mensaje ?? error?.message) };
   }
 
   revalidatePath("/admin/productos");
-  return { ok: true, sku };
+  return { ok: true, sku: result.sku };
 }
 
 export async function uploadVariantImage(

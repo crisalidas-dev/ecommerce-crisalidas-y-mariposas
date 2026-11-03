@@ -17,7 +17,9 @@ import {
   setVariantActive,
   uploadVariantImage,
 } from "../actions";
+import { VARIANT_NAME_MAX, unnamedVariantToName, variantNameError } from "@/lib/domain/sku";
 import { productTypeLabel } from "../productTypes";
+import { SkuHelpButton } from "../SkuHelpButton";
 import { PublishBadge } from "../PublishBadge";
 import { ActionStatus } from "../../ui/ActionStatus";
 import { BackLink } from "../../ui/BackLink";
@@ -103,7 +105,7 @@ export function ProductEditor({ product }: { product: ProductDetail }) {
         ) : null}
       </div>
 
-      <AddVariantForm productId={product.id} productSku={product.sku} />
+      <AddVariantForm productId={product.id} productSku={product.sku} variants={product.variants} />
 
       {product.options.length > 0 ? (
         <div className="flex flex-col gap-3">
@@ -287,10 +289,14 @@ function VariantCard({ variant, stockItems }: { variant: VariantRow; stockItems:
         onClick={() =>
           startTransition(async () => {
             try {
-              await setVariantActive(variant.id, !active);
-              setActive((v) => !v);
-              setError(null);
-              setNotice(null);
+              const res = await setVariantActive(variant.id, !active);
+              if (res.ok) {
+                setActive((v) => !v);
+                setError(null);
+                setNotice(null);
+              } else {
+                setError(res.error);
+              }
             } catch {
               setError(VARIANT_ACTIVE_ERROR);
             }
@@ -477,16 +483,36 @@ function RecipeEditor({
   );
 }
 
-function AddVariantForm({ productId, productSku }: { productId: string; productSku: string }) {
+function AddVariantForm({
+  productId,
+  productSku,
+  variants,
+}: {
+  productId: string;
+  productSku: string;
+  variants: VariantRow[];
+}) {
   const [attributeKey, setAttributeKey] = useState("");
   const [attributeValue, setAttributeValue] = useState("");
+  const [unnamedKey, setUnnamedKey] = useState("");
+  const [unnamedValue, setUnnamedValue] = useState("");
   const [stockQty, setStockQty] = useState(0);
   const [error, setError] = useState<string | null>(null);
   const [added, setAdded] = useState(false);
   const keyId = useId();
   const valueId = useId();
   const qtyId = useId();
+  const unnamedKeyId = useId();
+  const unnamedValueId = useId();
   const [pending, startTransition] = useTransition();
+
+  // Con una sola variante activa y sin nombre, la segunda obliga a nombrar la primera.
+  const unnamed = unnamedVariantToName(variants);
+  const invalid =
+    variantNameError(attributeValue) !== null ||
+    variantNameError(unnamedValue) !== null ||
+    (unnamed !== null && (unnamedKey.trim() === "" || unnamedValue.trim() === "")) ||
+    (unnamed !== null && (attributeKey.trim() === "" || attributeValue.trim() === ""));
 
   return (
     <form
@@ -496,10 +522,13 @@ function AddVariantForm({ productId, productSku }: { productId: string; productS
         setAdded(false);
         const fd = new FormData();
         fd.set("productId", productId);
-        fd.set("productSku", productSku);
         fd.set("attributeKey", attributeKey);
         fd.set("attributeValue", attributeValue);
         fd.set("stockQty", String(stockQty));
+        if (unnamed) {
+          fd.set("unnamedAttributeKey", unnamedKey);
+          fd.set("unnamedAttributeValue", unnamedValue);
+        }
         startTransition(async () => {
           const res = await createVariant(fd);
           if (res.ok) {
@@ -507,6 +536,8 @@ function AddVariantForm({ productId, productSku }: { productId: string; productS
             setAdded(true);
             setAttributeKey("");
             setAttributeValue("");
+            setUnnamedKey("");
+            setUnnamedValue("");
             setStockQty(0);
           } else {
             setError(res.error);
@@ -514,6 +545,52 @@ function AddVariantForm({ productId, productSku }: { productId: string; productS
         });
       }}
     >
+      <div className="flex w-full items-center gap-2 text-xs text-admin-ink-muted">
+        <span>
+          La nueva variante tomará el siguiente número después de <span className="font-admin-mono">{productSku}</span>
+          -V…
+        </span>
+        <SkuHelpButton />
+      </div>
+
+      {unnamed ? (
+        <fieldset className="flex w-full flex-wrap items-end gap-4 rounded-lg bg-admin-surface-sunken p-3">
+          <legend className="px-1 text-sm font-medium text-admin-ink">
+            Nombra la variante actual ({unnamed.sku})
+          </legend>
+          <p className="w-full text-xs text-admin-ink-muted">
+            Con 2 o más variantes, todas necesitan nombre: es lo que ve el cliente en WhatsApp.
+          </p>
+          <div className="flex flex-col gap-1">
+            <label htmlFor={unnamedKeyId} className={labelClass}>
+              Atributo
+            </label>
+            <input
+              id={unnamedKeyId}
+              value={unnamedKey}
+              onChange={(e) => setUnnamedKey(e.target.value)}
+              className={inputClass}
+              placeholder="color"
+              required
+            />
+          </div>
+          <div className="flex flex-col gap-1">
+            <label htmlFor={unnamedValueId} className={labelClass}>
+              Valor
+            </label>
+            <input
+              id={unnamedValueId}
+              value={unnamedValue}
+              onChange={(e) => setUnnamedValue(e.target.value)}
+              maxLength={VARIANT_NAME_MAX}
+              className={inputClass}
+              placeholder="blanco"
+              required
+            />
+          </div>
+        </fieldset>
+      ) : null}
+
       <div className="flex flex-col gap-1">
         <label htmlFor={keyId} className={labelClass}>
           Atributo
@@ -524,18 +601,21 @@ function AddVariantForm({ productId, productSku }: { productId: string; productS
           onChange={(e) => setAttributeKey(e.target.value)}
           className={inputClass}
           placeholder="color"
+          required={unnamed !== null}
         />
       </div>
       <div className="flex flex-col gap-1">
         <label htmlFor={valueId} className={labelClass}>
-          Valor
+          Valor (máx. {VARIANT_NAME_MAX})
         </label>
         <input
           id={valueId}
           value={attributeValue}
           onChange={(e) => setAttributeValue(e.target.value)}
+          maxLength={VARIANT_NAME_MAX}
           className={inputClass}
           placeholder="blanco"
+          required={unnamed !== null}
         />
       </div>
       <div className="flex flex-col gap-1">
@@ -552,11 +632,7 @@ function AddVariantForm({ productId, productSku }: { productId: string; productS
           className={`${inputClass} w-24 font-admin-mono`}
         />
       </div>
-      <button
-        type="submit"
-        disabled={pending}
-        className={primaryButtonClass}
-      >
+      <button type="submit" disabled={pending || invalid} className={primaryButtonClass}>
         Agregar variante
       </button>
       <ActionStatus

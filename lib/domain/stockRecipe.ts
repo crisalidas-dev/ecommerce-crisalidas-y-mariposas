@@ -85,9 +85,34 @@ const RPC_MESSAGES: Record<string, string> = {
   SKU_BASE_INVALIDO: "El insumo base no tiene una referencia válida para derivar variantes.",
   SUFIJOS_AGOTADOS: "Ese insumo ya no admite más variantes.",
   SECUENCIA_AGOTADA: "Se agotó la secuencia de referencias para este origen.",
+  VARIANTE_SIN_NOMBRE: "Con dos o más variantes activas, todas necesitan nombre.",
+  NOMBRE_VARIANTE_DUPLICADO: "Dos variantes activas del producto no pueden tener el mismo nombre.",
+  NOMBRE_VARIANTE_LARGO: "El nombre de la variante admite máximo 20 caracteres (límite de los botones de WhatsApp).",
+  SIN_VARIANTE_POR_NOMBRAR: "No hay una única variante sin nombre para nombrar. Recarga el producto.",
+  ATRIBUTOS_INVALIDOS: "Los atributos de la variante no son válidos.",
+  VARIANTES_AGOTADAS: "Este producto ya usó los 99 números de variante (V01 a V99). Crea un producto nuevo.",
+  PRECIO_INVALIDO: "El precio base debe ser un entero en pesos mayor o igual a cero.",
+  LINEA_NO_EXISTE: "Esa línea de producto ya no existe.",
+  LINEA_INACTIVA: "Esa línea de producto está desactivada.",
+  MARCA_INVALIDA: "La línea pertenece a una marca que no vende en el sitio.",
+  NOMBRE_SIN_CARACTERES_VALIDOS: "El nombre debe tener al menos una letra o un número para generar el SKU.",
+  SKU_AGOTADO: "Hay demasiados productos con ese nombre en esa línea. Cambia el nombre.",
 };
 
 export function rpcErrorMessage(code: string | undefined | null, fallback?: string): string {
   if (code && RPC_MESSAGES[code]) return RPC_MESSAGES[code];
   return fallback || "No se pudo completar la operación.";
+}
+
+/**
+ * Error de PostgREST en una escritura directa. Los triggers de nombre de
+ * variante llegan como P0001 con `message` = código; una violación única
+ * (23505) en `product_lines` es un código de línea repetido.
+ */
+export function postgrestErrorMessage(error: { code?: string; message?: string; details?: string | null }): string {
+  if (error.code === "23505") return "Ya existe una línea con ese código en esta marca. Cambia el código.";
+  if (error.code === "P0001" && error.message && RPC_MESSAGES[error.message]) {
+    return error.details || RPC_MESSAGES[error.message];
+  }
+  return "No se pudo completar la operación.";
 }
