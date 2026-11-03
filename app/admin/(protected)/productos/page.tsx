@@ -5,6 +5,7 @@ import { formatCop } from "@/lib/format";
 import { InventoryTabs } from "./InventoryTabs";
 import { classifyStock, STOCK_LEVEL_LABEL } from "@/lib/domain/stockLevel";
 import { chipClass, focusRingClass as FOCUS_RING, secondaryButtonClass } from "../ui/formClasses";
+import { ActionStatus } from "../ui/ActionStatus";
 import { ProductThumbnail } from "./ProductThumbnail";
 import { PublishBadge } from "./PublishBadge";
 import { PRODUCT_TYPES, groupProductsByType, isProductType } from "./productTypes";
@@ -63,9 +64,9 @@ function CardGrid({ products }: { products: ProductListItem[] }) {
 export default async function ProductosPage({
   searchParams,
 }: {
-  searchParams: Promise<{ brand?: string; estado?: string }>;
+  searchParams: Promise<{ brand?: string; estado?: string; eliminado?: string }>;
 }) {
-  const { brand: rawBrand, estado } = await searchParams;
+  const { brand: rawBrand, estado, eliminado } = await searchParams;
   const brand = isProductType(rawBrand) ? rawBrand : undefined;
   const published = estado === "publicados" ? true : estado === "despublicados" ? false : undefined;
 
@@ -86,6 +87,8 @@ export default async function ProductosPage({
   return (
     <div className="animate-view-in flex flex-col gap-6">
       <InventoryTabs active="productos" />
+      {/* Lo pone deleteProduct al redirigir; React escapa el texto. */}
+      {eliminado ? <ActionStatus message={{ tone: "ok", text: `Se eliminó "${eliminado}".` }} /> : null}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-xl font-bold tracking-tight text-admin-ink">Productos</h1>

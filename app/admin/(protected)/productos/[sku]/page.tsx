@@ -12,10 +12,10 @@ export default async function EditarProductoPage({
   searchParams,
 }: {
   params: Promise<{ sku: string }>;
-  searchParams: Promise<{ foto?: string }>;
+  searchParams: Promise<{ foto?: string; warning?: string }>;
 }) {
   const { sku } = await params;
-  const { foto } = await searchParams;
+  const { foto, warning } = await searchParams;
   const product = await getProductBySku(sku);
   if (!product) notFound();
 
@@ -29,6 +29,8 @@ export default async function EditarProductoPage({
           }}
         />
       ) : null}
+      {/* Avisos de createProduct (techo de precio, crisálidas sin guardar); React escapa el texto. */}
+      {warning ? <ActionStatus message={{ tone: "warn", text: warning }} /> : null}
       <ProductEditor product={product} />
     </div>
   );

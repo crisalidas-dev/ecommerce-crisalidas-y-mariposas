@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   computeRecipeAvailability,
+  recipeCandidates,
   rpcErrorMessage,
   postgrestErrorMessage,
   validateRecipeRows,
@@ -116,6 +117,21 @@ describe("rpcErrorMessage", () => {
       assert.doesNotMatch(rpcErrorMessage(code), /No se pudo completar/, code);
     }
   });
+  it("traduce los códigos de simbolismo y nombre corto de create_product_with_variant", () => {
+    for (const code of ["NOMBRE_CORTO_LARGO", "NOMBRE_CORTO_REQUERIDO", "SIMBOLISMO_REQUERIDO"]) {
+      assert.doesNotMatch(rpcErrorMessage(code), /No se pudo completar/, code);
+    }
+  });
+  it("traduce los códigos de delete_product", () => {
+    for (const code of ["PRODUCTO_NO_EXISTE", "PRODUCTO_CON_HISTORIAL", "INSUMO_EN_USO"]) {
+      assert.doesNotMatch(rpcErrorMessage(code), /No se pudo completar/, code);
+    }
+  });
+  it("traduce los códigos de delete_variant", () => {
+    for (const code of ["VARIANTE_NO_EXISTE", "VARIANTE_CON_HISTORIAL", "ULTIMA_VARIANTE", "INSUMO_EN_USO"]) {
+      assert.doesNotMatch(rpcErrorMessage(code), /No se pudo completar/, code);
+    }
+  });
   it("usa el mensaje de respaldo o uno genérico para códigos desconocidos", () => {
     assert.equal(rpcErrorMessage("RARO", "del servidor"), "del servidor");
     assert.match(rpcErrorMessage("RARO"), /No se pudo/);
@@ -135,5 +151,17 @@ describe("postgrestErrorMessage", () => {
   });
   it("cae al mensaje genérico", () => {
     assert.match(postgrestErrorMessage({ code: "XX", message: "boom" }), /No se pudo/);
+  });
+});
+
+describe("recipeCandidates", () => {
+  const stock = [
+    { id: "comp", kind: "component" as const, isActive: true },
+    { id: "used", kind: "component" as const, isActive: true },
+    { id: "off", kind: "component" as const, isActive: false },
+    { id: "self", kind: "self" as const, isActive: true },
+  ];
+  it("keeps active components not already in the recipe; never self mirror items", () => {
+    assert.deepEqual(recipeCandidates(stock, ["used"]).map((i) => i.id), ["comp"]);
   });
 });

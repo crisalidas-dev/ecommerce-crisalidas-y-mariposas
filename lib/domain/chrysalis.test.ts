@@ -1,6 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { chrysalisExtrasPerUnit, isChrysalisExtra, lineChrysalis, optionQty } from "./chrysalis.ts";
+import {
+  CHRYSALIS_COUNT_MAX,
+  chrysalisExtrasPerUnit,
+  isChrysalisExtra,
+  lineChrysalis,
+  optionQty,
+  parseChrysalisCount,
+} from "./chrysalis.ts";
 
 describe("isChrysalisExtra", () => {
   it("ignora tildes y mayúsculas", () => {
@@ -67,5 +74,29 @@ describe("optionQty", () => {
     for (const qty of [-2, "2", 1.5, undefined]) {
       assert.equal(chrysalisExtrasPerUnit([{ nombre: "Crisalida adicional", qty }]), optionQty(qty));
     }
+  });
+});
+
+describe("parseChrysalisCount", () => {
+  it("accepts an integer from 0 to 999 for crisalidas", () => {
+    assert.deepEqual(parseChrysalisCount("crisalidas", "2"), { ok: true, value: 2 });
+    assert.deepEqual(parseChrysalisCount("crisalidas", 0), { ok: true, value: 0 });
+    assert.deepEqual(parseChrysalisCount("crisalidas", " 999 "), { ok: true, value: CHRYSALIS_COUNT_MAX });
+  });
+  it("is required for crisalidas", () => {
+    for (const raw of [undefined, null, "", "  "]) {
+      const r = parseChrysalisCount("crisalidas", raw);
+      assert.equal(r.ok, false, String(raw));
+    }
+  });
+  it("rejects decimals, negatives, text and values above 999", () => {
+    for (const raw of ["1.5", "-1", "dos", "1000", 2.5]) {
+      assert.equal(parseChrysalisCount("crisalidas", raw).ok, false, String(raw));
+    }
+  });
+  it("must be absent for complementos", () => {
+    assert.deepEqual(parseChrysalisCount("complementos", undefined), { ok: true, value: null });
+    assert.deepEqual(parseChrysalisCount("complementos", ""), { ok: true, value: null });
+    assert.equal(parseChrysalisCount("complementos", "3").ok, false);
   });
 });

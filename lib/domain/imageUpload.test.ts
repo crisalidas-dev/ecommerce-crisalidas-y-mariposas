@@ -6,6 +6,7 @@ import {
   imageObjectPath,
   optionalImageFile,
   storagePathFromPublicUrl,
+  storagePathsForUrls,
   validateImageFile,
 } from "./imageUpload.ts";
 
@@ -82,5 +83,29 @@ describe("optionalImageFile", () => {
   it("returns the file when one was picked", () => {
     const file = new File(["x"], "a.png", { type: "image/png" });
     assert.equal(optionalImageFile(file), file);
+  });
+});
+
+describe("storagePathsForUrls", () => {
+  it("maps every URL of our bucket, in either folder, and drops duplicates", () => {
+    assert.deepEqual(
+      storagePathsForUrls([
+        `${BASE}/${IMAGE_BUCKET}/variants/CRI-1-V01.webp`,
+        `${BASE}/${IMAGE_BUCKET}/stock-items/CRI-1-V01.jpg?t=2`,
+        `${BASE}/${IMAGE_BUCKET}/variants/CRI-1-V01.webp`,
+      ]),
+      ["variants/CRI-1-V01.webp", "stock-items/CRI-1-V01.jpg"],
+    );
+  });
+  it("skips other buckets, other folders and garbage", () => {
+    assert.deepEqual(
+      storagePathsForUrls([
+        `${BASE}/otro/variants/x.jpg`,
+        `${BASE}/${IMAGE_BUCKET}/productos/x.jpg`,
+        "https://cdn.example.com/x.jpg",
+        "",
+      ]),
+      [],
+    );
   });
 });

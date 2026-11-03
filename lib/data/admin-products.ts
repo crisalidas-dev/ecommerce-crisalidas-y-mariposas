@@ -19,6 +19,10 @@ export interface VariantRow {
   bottleneckItemId: string | null;
   /** Insumo espejo 1:1 de la variante (`kind='self'`), si existe. */
   selfItemId: string | null;
+  /** Alguna reserva (en cualquier estado): tiene pedidos, no se puede eliminar (delete_variant, 051). */
+  hasOrderHistory: boolean;
+  /** Crisálidas por unidad. NULL = sin definir (producción no la suma); 0 = no lleva. */
+  chrysalisCount: number | null;
   components: RecipeComponent[];
 }
 
@@ -55,6 +59,11 @@ export interface ProductDetail {
   base_price: number;
   is_published: boolean;
   simbolismo: string | null;
+  short_name: string | null;
+  /** Mayor número -VNN ya entregado (047): el siguiente SKU nunca reutiliza uno borrado. */
+  lastVariantNumber: number;
+  /** Alguna reserva (en cualquier estado) sobre sus variantes: hay pedidos, no se puede eliminar. */
+  hasOrderHistory: boolean;
   variants: VariantRow[];
   options: OptionRow[];
   /** Todos los insumos (con disponibilidad) para el selector y la vista previa de la receta. */
@@ -68,6 +77,7 @@ interface RawVariant {
   price_delta: number | string;
   is_active: boolean;
   image_url: string | null;
+  chrysalis_count: number | null;
 }
 
 export async function getProducts(filters: {
@@ -129,7 +139,7 @@ export async function getProductBySku(sku: string): Promise<ProductDetail | null
   const { data, error } = await supabase
     .from("products")
     .select(
-      "id, sku, name, brand, category, description, base_price, is_published, simbolismo, product_variants(id, sku, attributes, price_delta, is_active, image_url)",
+      "id, sku, name, brand, category, description, base_price, is_published, simbolismo, short_name, last_variant_number, product_variants(id, sku, attributes, price_delta, is_active, image_url, chrysalis_count)",
     )
     .eq("sku", sku)
     .maybeSingle();
@@ -140,7 +150,7 @@ export async function getProductBySku(sku: string): Promise<ProductDetail | null
   const rawVariants = data.product_variants as unknown as RawVariant[];
   const variantIds = rawVariants.map((v) => v.id);
 
-  const [availRes, varCompRes, optionsRes, stockItems] = await Promise.all([
+  const [availRes, varCompRes, optionsRes, stockItems, historyRes] = await Promise.all([
     supabase
       .from("v_variant_availability")
       .select("variant_id, available_units, bottleneck_item_id")
@@ -151,8 +161,12 @@ export async function getProductBySku(sku: string): Promise<ProductDetail | null
       .in("variant_id", variantIds),
     supabase.from("product_options").select("id, name").eq("product_id", data.id).order("name"),
     getStockItems({ includeSelf: true }),
+    // Las reservas enlazan los pedidos con las variantes (delete_product, 050).
+    supabase.from("reservations").select("variant_id").in("variant_id", variantIds),
   ]);
   if (availRes.error) throw availRes.error;
+  if (historyRes.error) throw historyRes.error;
+  const variantsWithHistory = new Set((historyRes.data ?? []).map((r) => r.variant_id as string));
   if (varCompRes.error) throw varCompRes.error;
   if (optionsRes.error) throw optionsRes.error;
 
@@ -194,6 +208,9 @@ export async function getProductBySku(sku: string): Promise<ProductDetail | null
     base_price: Number(data.base_price),
     is_published: data.is_published,
     simbolismo: data.simbolismo,
+    short_name: data.short_name,
+    lastVariantNumber: Number(data.last_variant_number ?? 0),
+    hasOrderHistory: variantsWithHistory.size > 0,
     variants: rawVariants.map((v) => {
       const av = availByVariant.get(v.id);
       return {
@@ -206,6 +223,8 @@ export async function getProductBySku(sku: string): Promise<ProductDetail | null
         availableUnits: Number(av?.available_units ?? 0),
         bottleneckItemId: (av?.bottleneck_item_id as string | null) ?? null,
         selfItemId: selfByVariant.get(v.id) ?? null,
+        hasOrderHistory: variantsWithHistory.has(v.id),
+        chrysalisCount: v.chrysalis_count ?? null,
         components: compsByVariant.get(v.id) ?? [],
       };
     }),

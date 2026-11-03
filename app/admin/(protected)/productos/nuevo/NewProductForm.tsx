@@ -2,11 +2,17 @@
 
 import { useActionState, useState } from "react";
 import { activeLinesOfBrand, type ProductLine } from "@/lib/domain/productLine";
+import { productSheetErrors, shortNameField } from "@/lib/domain/productSheet";
 import { VARIANT_NAME_MAX, productSkuPreview, variantNameError, variantSkuPreview } from "@/lib/domain/sku";
 import { ActionStatus } from "../../ui/ActionStatus";
+import { CopInput } from "../../ui/CopInput";
 import { fieldsetClass, helpTextClass, inputClass, labelClass, primaryButtonClass, selectClass } from "../../ui/formClasses";
 import { PhotoPicker } from "../../ui/PhotoPicker";
 import { createProduct, type FormState } from "../actions";
+import { DescriptionField, SimbolismoField } from "../ProductCopyFields";
+import { ProductNameFields } from "../ProductNameFields";
+import { ChrysalisCountField } from "../ChrysalisCountField";
+import { parseChrysalisCount } from "@/lib/domain/chrysalis";
 import { CRISALIDAS_COLLECTIONS, PRODUCT_TYPES } from "../productTypes";
 import { SkuHelpButton } from "../SkuHelpButton";
 import { LineSelector, NEW_LINE } from "./LineSelector";
@@ -28,16 +34,26 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
   // acción aunque devuelva un error y se perdería lo escrito.
   const [attributeValue, setAttributeValue] = useState("");
   const [description, setDescription] = useState("");
+  const [simbolismo, setSimbolismo] = useState("");
+  // Mientras no se edite a mano, el nombre corto sigue la sugerencia derivada
+  // del nombre; vaciarlo vuelve a seguirla.
+  const [editedShortName, setEditedShortName] = useState<string | null>(null);
   const [category, setCategory] = useState("");
-  const [basePrice, setBasePrice] = useState("");
+  const [basePrice, setBasePrice] = useState<number | null>(null);
   const [attributeKey, setAttributeKey] = useState("");
-  const [stockQty, setStockQty] = useState("0");
+  const [chrysalisCount, setChrysalisCount] = useState("");
 
   const brandLines = activeLinesOfBrand(lines, brand);
   const line = brandLines.find((l) => l.id === lineChoice) ?? null;
   const productSku = productSkuPreview(brand, line?.code ?? "", name);
   const variantSku = variantSkuPreview(productSku);
   const valueError = variantNameError(attributeValue);
+  // El nombre corto solo se pide cuando el nombre no cabe en el botón de WhatsApp.
+  const shortName = shortNameField(name, editedShortName);
+  const sheetErrors = productSheetErrors({ brand, name, simbolismo, shortName: shortName.value });
+  const sheetInvalid = Boolean(sheetErrors.simbolismo || sheetErrors.shortName);
+  // Solo Crisálidas lleva crisálidas; en Complementos el campo no existe.
+  const chrysalisInvalid = !parseChrysalisCount(brand, brand === "crisalidas" ? chrysalisCount : "").ok;
 
   return (
     <form action={formAction} className="grid grid-cols-1 gap-6 md:grid-cols-5">
@@ -103,19 +119,14 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
             <input type="hidden" name="lineId" value={lineChoice === NEW_LINE ? "" : lineChoice} />
           </div>
 
-          <div className="flex flex-col gap-1 md:col-span-6">
-            <label htmlFor="name" className={labelClass}>
-              Nombre
-            </label>
-            <input
-              id="name"
-              name="name"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              required
-              className={inputClass}
-            />
-          </div>
+          <ProductNameFields
+            name={name}
+            onNameChange={setName}
+            editedShortName={editedShortName}
+            onEditedShortNameChange={setEditedShortName}
+            shortNameInvalid={Boolean(sheetErrors.shortName)}
+            cellClassName="md:col-span-6"
+          />
 
           <div className="flex flex-col gap-1 md:col-span-6">
             <p className={labelClass}>
@@ -137,33 +148,14 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
             <label htmlFor="basePrice" className={labelClass}>
               Precio base (COP)
             </label>
-            <input
-              id="basePrice"
-              name="basePrice"
-              type="number"
-              inputMode="numeric"
-              value={basePrice}
-              onChange={(e) => setBasePrice(e.target.value)}
-              min={0}
-              step={1}
-              required
-              className={`${inputClass} font-admin-mono`}
-            />
+            <CopInput id="basePrice" name="basePrice" value={basePrice} onChange={setBasePrice} required />
           </div>
 
-          <div className="flex flex-col gap-1 md:col-span-12">
-            <label htmlFor="description" className={labelClass}>
-              Descripción
-            </label>
-            <textarea
-              id="description"
-              name="description"
-              rows={3}
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-              className={inputClass}
-            />
-          </div>
+          <DescriptionField value={description} onChange={setDescription} className="md:col-span-12" />
+
+          {brand === "crisalidas" ? (
+            <SimbolismoField value={simbolismo} onChange={setSimbolismo} className="md:col-span-12" />
+          ) : null}
         </div>
       </fieldset>
 
@@ -205,30 +197,26 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
               ej. blanco · es el nombre que ve el cliente en WhatsApp (máx. {VARIANT_NAME_MAX})
             </p>
           </div>
-          <div className="flex flex-col gap-1">
+          <div className="flex flex-col gap-1 sm:col-span-2">
             <p className={labelClass}>SKU de la variante</p>
             <output aria-live="polite" className="flex min-h-11 items-center font-admin-mono text-sm font-semibold text-admin-ink">
               {variantSku ?? "—"}
             </output>
+            <p className={helpTextClass}>
+              La disponibilidad se calcula con los componentes (insumos) del producto: se asignan en el editor del
+              producto después de crearlo.
+            </p>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="stockQty" className={labelClass}>
-              Stock inicial
-            </label>
-            <input
-              id="stockQty"
-              name="stockQty"
-              type="number"
-              min={0}
-              step={1}
-              inputMode="numeric"
-              value={stockQty}
-              onChange={(e) => setStockQty(e.target.value)}
-              required
-              className={`${inputClass} font-admin-mono`}
+          {brand === "crisalidas" ? (
+            <ChrysalisCountField
+              id="chrysalisCount"
+              name="chrysalisCount"
+              value={chrysalisCount}
+              onChange={setChrysalisCount}
+              className="sm:col-span-2"
             />
-          </div>
+          ) : null}
 
           <PhotoPicker className="sm:col-span-2" />
         </div>
@@ -237,7 +225,7 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
       <div className="flex flex-col gap-4 md:col-span-5">
         <ActionStatus message={state.error ? { tone: "error", text: state.error } : null} />
 
-        <button type="submit" disabled={pending || !line || Boolean(valueError)} className={`${primaryButtonClass} w-fit`}>
+        <button type="submit" disabled={pending || !line || Boolean(valueError) || sheetInvalid || chrysalisInvalid} className={`${primaryButtonClass} w-fit`}>
           {pending ? "Creando..." : "Crear producto"}
         </button>
       </div>

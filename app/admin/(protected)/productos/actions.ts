@@ -1,35 +1,43 @@
 "use server";
 
-import { revalidatePath } from "next/cache";
+import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { postgrestErrorMessage, rpcErrorMessage } from "@/lib/domain/stockRecipe";
-import { clearImage, storeImage } from "@/lib/admin/imageStorage";
+import { clearImage, removeStoredImages, storeImage } from "@/lib/admin/imageStorage";
+import { requireProductEditor } from "@/lib/admin/productGuard";
+import { COP_AMOUNT_MAX } from "@/lib/domain/copAmount";
+import { priceCeilingWarning } from "@/lib/domain/priceCeiling";
+import { parseChrysalisCount } from "@/lib/domain/chrysalis";
+import { combineWarnings } from "@/lib/domain/actionWarnings";
 import { optionalImageFile, validateImageFile } from "@/lib/domain/imageUpload";
 import { parseNewLineInput, type ProductLine } from "@/lib/domain/productLine";
-import { variantNameError } from "@/lib/domain/sku";
-
-/** Techos de precio de Crisálidas (spec 001 §4.1) — advertencia, no bloqueo
- * (spec 002 §3.4.3): no hay CHECK en la base, así que tampoco lo hay aquí. */
-const CRISALIDAS_PRICE_CEILING: Record<string, number> = {
-  "Pequeños Milagros": 100000,
-  "Instantes de Vida": 200000,
-  "Grandes Transformaciones": 300000,
-  "Experiencias de Colección": 350000,
-};
+import {
+  firstProductSheetError,
+  parseProductCopy,
+  parseProductName,
+  productSheetErrors,
+  productSheetValues,
+} from "@/lib/domain/productSheet";
+import { parseVariantAttributes, variantNameError } from "@/lib/domain/sku";
 
 export type FormState = { error: string | null; warning?: string | null };
 
 const createProductSchema = z.object({
   lineId: z.string().uuid("Elige la línea del producto."),
+  // Solo para validar antes de llamar a la RPC; la marca real sale de la línea.
+  brand: z.string().trim().default(""),
   name: z.string().trim().min(1, "El nombre del producto es obligatorio."),
+  shortName: z.string().optional(),
   description: z.string().trim().optional(),
+  simbolismo: z.string().optional(),
   category: z.string().trim().optional(),
   basePrice: z.coerce.number().int().nonnegative(),
   attributeKey: z.string().trim().optional(),
   attributeValue: z.string().trim().optional(),
-  stockQty: z.coerce.number().int().nonnegative(),
+  // Solo Crisálidas; se valida con parseChrysalisCount.
+  chrysalisCount: z.string().optional(),
 });
 
 type RpcResult = { ok?: boolean; error?: string; mensaje?: string } | null;
@@ -66,6 +74,14 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
   const nameError = variantNameError(input.attributeValue ?? "");
   if (nameError) return { error: nameError };
 
+  // Simbolismo (Crisálidas) y nombre corto (botón de WhatsApp): la RPC repite
+  // estas reglas con la marca de la línea; aquí se evita el viaje.
+  const sheetError = firstProductSheetError(productSheetErrors(input));
+  if (sheetError) return { error: sheetError };
+  const sheet = productSheetValues(input);
+  const chrysalis = parseChrysalisCount(input.brand, input.chrysalisCount);
+  if (!chrysalis.ok) return { error: chrysalis.error };
+
   // La foto es opcional; se valida antes de crear nada para no dejar un producto a medias.
   const photo = optionalImageFile(formData.get("photo"));
   if (photo) {
@@ -83,7 +99,10 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
     p_description: input.description || null,
     p_category: input.category || null,
     p_attributes: attributes,
-    p_stock_qty: input.stockQty,
+    // Sin p_stock_qty (la RPC usa 0): la disponibilidad sale de los componentes
+    // de la variante (v_variant_availability), que se asignan en el editor.
+    p_simbolismo: sheet.simbolismo,
+    p_short_name: sheet.shortName,
   });
   const result = data as
     | (RpcResult & { product_sku?: string; brand?: string; variant_id?: string })
@@ -93,13 +112,12 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
     return { error: `No se pudo crear el producto: ${rpcErrorMessage(result?.error, result?.mensaje ?? error?.message)}` };
   }
 
-  let warning: string | null = null;
-  if (result.brand === "crisalidas" && input.category) {
-    const ceiling = CRISALIDAS_PRICE_CEILING[input.category];
-    if (ceiling && input.basePrice > ceiling) {
-      warning = `El precio supera el techo de "${input.category}" (${ceiling.toLocaleString("es-CO")} COP) — se guardó igual.`;
-    }
-  }
+  // Techo de precio de Crisálidas: advertencia, no bloqueo (spec 002 §3.4.3).
+  const warnings = [priceCeilingWarning(result.brand ?? "", input.category, input.basePrice)];
+  // La marca real es la de la línea (result.brand). Ninguna RPC recibe
+  // chrysalis_count: se guarda aparte, así que NO es atómico con la creación.
+  if (result.brand === "crisalidas") warnings.push(await saveChrysalisCount(result.variant_id, chrysalis.value));
+  const warning = combineWarnings(...warnings);
 
   // Si la foto falla, el producto ya existe: no se revierte y la ficha avisa con `?foto=error`.
   let photoFailed = false;
@@ -127,6 +145,229 @@ export async function setProductPublished(productId: string, published: boolean)
   revalidatePath("/admin/productos");
 }
 
+/**
+ * Lo que ven la tienda y el panel de un producto cambió (ficha, precio, nombre
+ * o el producto ya no existe). El catálogo está en unstable_cache (tag
+ * storefront-products, 5 min): updateTag lo expira ya. Portada (destacados),
+ * catálogo y fichas se regeneran en la próxima visita. n8n lee get_product en
+ * vivo: no necesita nada.
+ */
+function revalidateProduct(sku: string | null) {
+  if (sku) revalidatePath(`/admin/productos/${sku}`);
+  revalidatePath("/admin/productos");
+  updateTag("storefront-products");
+  revalidatePath("/");
+  revalidatePath("/catalogo");
+  revalidatePath("/catalogo/[slug]", "page");
+}
+
+/** El producto tal como está en la base: la marca y la colección nunca vienen del cliente. */
+async function loadProduct(productId: string) {
+  const { data, error } = await createAdminClient()
+    .from("products")
+    .select("sku, brand, category")
+    .eq("id", productId)
+    .maybeSingle();
+  if (error) return { ok: false as const, error: "No se pudo leer el producto. Inténtalo de nuevo." };
+  if (!data) return { ok: false as const, error: rpcErrorMessage("PRODUCTO_NO_EXISTE") };
+  return { ok: true as const, product: data as { sku: string; brand: string; category: string | null } };
+}
+
+const productIdSchema = z.string().uuid("Producto inválido.");
+
+const updateProductCopySchema = z.object({
+  productId: productIdSchema,
+  description: z.string().optional(),
+  simbolismo: z.string().optional(),
+});
+
+/**
+ * Edita descripción y simbolismo de un producto existente. La marca se lee de
+ * la base por id (nunca del cliente): decide si el simbolismo es obligatorio
+ * (Crisálidas) o se guarda null (Complementos).
+ */
+export async function updateProductCopy(input: {
+  productId: string;
+  description?: string;
+  simbolismo?: string;
+}): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
+  const parsed = updateProductCopySchema.safeParse(input);
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+
+  const loaded = await loadProduct(parsed.data.productId);
+  if (!loaded.ok) return { error: loaded.error };
+
+  const copy = parseProductCopy(loaded.product.brand, parsed.data);
+  if (!copy.ok) return { error: copy.error };
+
+  const { error } = await createAdminClient()
+    .from("products")
+    .update({ description: copy.data.description, simbolismo: copy.data.simbolismo })
+    .eq("id", parsed.data.productId);
+  if (error) return { error: postgrestErrorMessage(error) };
+
+  revalidateProduct(loaded.product.sku);
+  return { error: null };
+}
+
+const updateBasePriceSchema = z.object({
+  productId: productIdSchema,
+  basePrice: z
+    .number({ message: "Escribe el precio base." })
+    .int("El precio base debe ser un entero en pesos.")
+    .min(0, "El precio base no puede ser negativo.")
+    .max(COP_AMOUNT_MAX, "El precio base es demasiado alto."),
+});
+
+/**
+ * Cambia el precio base. El precio de cada variante es base_price + price_delta,
+ * así que cambia en todas; los pedidos y reservas ya creados guardan su propio
+ * precio (unit_price/total_price) y no cambian. El techo de Crisálidas avisa,
+ * no bloquea.
+ */
+export async function updateProductBasePrice(productId: string, basePrice: number): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
+  const parsed = updateBasePriceSchema.safeParse({ productId, basePrice });
+  if (!parsed.success) {
+    return { error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
+  }
+
+  const loaded = await loadProduct(parsed.data.productId);
+  if (!loaded.ok) return { error: loaded.error };
+
+  const { error } = await createAdminClient()
+    .from("products")
+    .update({ base_price: parsed.data.basePrice })
+    .eq("id", parsed.data.productId);
+  if (error) return { error: postgrestErrorMessage(error) };
+
+  revalidateProduct(loaded.product.sku);
+  return {
+    error: null,
+    warning: priceCeilingWarning(loaded.product.brand, loaded.product.category, parsed.data.basePrice),
+  };
+}
+
+/**
+ * Renombra el producto. El SKU no cambia (pedidos, insumos, variantes y n8n
+ * dependen de él; el slug de la tienda sale del SKU). El nombre corto solo se
+ * guarda si el nombre pasa de 20; si no, queda NULL (get_product lo ignora).
+ */
+export async function updateProductName(productId: string, name: string, shortName: string | null): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
+  if (!productIdSchema.safeParse(productId).success) return { error: "Producto inválido." };
+
+  const parsed = parseProductName(name, shortName);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const loaded = await loadProduct(productId);
+  if (!loaded.ok) return { error: loaded.error };
+
+  const { error } = await createAdminClient()
+    .from("products")
+    .update({ name: parsed.data.name, short_name: parsed.data.shortName })
+    .eq("id", productId);
+  if (error) return { error: postgrestErrorMessage(error) };
+
+  revalidateProduct(loaded.product.sku);
+  return { error: null };
+}
+
+/**
+ * Elimina un producto sin historial de pedidos (delete_product, 050). La base
+ * decide y se niega con PRODUCTO_CON_HISTORIAL o INSUMO_EN_USO; aquí solo se
+ * borran después las fotos que devuelve. Un fallo de storage no deshace nada.
+ */
+export async function deleteProduct(productId: string): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
+  if (!productIdSchema.safeParse(productId).success) return { error: "Producto inválido." };
+
+  const { data, error } = await createAdminClient().rpc("delete_product", { p_product: productId });
+  const result = data as (RpcResult & { sku?: string; name?: string; image_urls?: string[] }) | null;
+  if (error || !result?.ok) {
+    return { error: `No se pudo eliminar el producto: ${rpcErrorMessage(result?.error, result?.mensaje ?? error?.message)}` };
+  }
+
+  await removeStoredImages(result.image_urls ?? []);
+
+  revalidateProduct(null);
+  redirect(`/admin/productos?eliminado=${encodeURIComponent(result.name ?? result.sku ?? "")}`);
+}
+
+/**
+ * Elimina una variante sin historial (delete_variant, 051). La base se niega
+ * con VARIANTE_CON_HISTORIAL, ULTIMA_VARIANTE o INSUMO_EN_USO; aquí solo se
+ * borran después las fotos que devuelve (un fallo de storage solo se registra).
+ */
+export async function deleteVariant(
+  variantId: string,
+): Promise<{ ok: true; sku: string } | { ok: false; error: string }> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { ok: false, error: guard.error };
+  if (!z.string().uuid().safeParse(variantId).success) return { ok: false, error: "Variante inválida." };
+
+  const supabase = createAdminClient();
+  const { data, error } = await supabase.rpc("delete_variant", { p_variant: variantId });
+  const result = data as
+    | (RpcResult & { sku?: string; product_id?: string; image_urls?: string[] })
+    | null;
+  if (error || !result?.ok || !result.sku) {
+    return { ok: false, error: rpcErrorMessage(result?.error, result?.mensaje ?? error?.message) };
+  }
+
+  await removeStoredImages(result.image_urls ?? []);
+
+  // El SKU del producto para revalidar su ficha: la variante ya no existe.
+  const { data: product } = await supabase
+    .from("products")
+    .select("sku")
+    .eq("id", result.product_id ?? "")
+    .maybeSingle();
+  revalidateProduct((product?.sku as string | undefined) ?? null);
+  return { ok: true, sku: result.sku };
+}
+
+/**
+ * Renombra una variante: un atributo, { key: value } (el nombre que ve el
+ * cliente en WhatsApp). El trigger product_variants_enforce_names decide lo
+ * demás (máx. 20, sin duplicados, sin variantes activas sin nombre) y sus
+ * errores P0001 se traducen con postgrestErrorMessage.
+ */
+export async function updateVariantAttributes(variantId: string, key: string, value: string): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
+  if (!z.string().uuid().safeParse(variantId).success) return { error: "Variante inválida." };
+
+  const supabase = createAdminClient();
+  const { data, error: readError } = await supabase
+    .from("product_variants")
+    .select("attributes, products(sku)")
+    .eq("id", variantId)
+    .maybeSingle();
+  if (readError) return { error: "No se pudo leer la variante. Inténtalo de nuevo." };
+  if (!data) return { error: rpcErrorMessage("VARIANTE_NO_EXISTE") };
+
+  const parsed = parseVariantAttributes(key, value, data.attributes as Record<string, unknown> | null);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const { error } = await supabase
+    .from("product_variants")
+    .update({ attributes: parsed.attributes })
+    .eq("id", variantId);
+  if (error) return { error: postgrestErrorMessage(error) };
+
+  const product = (data.products ?? null) as unknown as { sku: string } | null;
+  revalidateProduct(product?.sku ?? null);
+  return { error: null };
+}
+
 export async function setVariantActive(
   variantId: string,
   active: boolean,
@@ -146,15 +387,32 @@ const createVariantSchema = z.object({
   productId: z.string().uuid(),
   attributeKey: z.string().trim().optional(),
   attributeValue: z.string().trim().optional(),
-  stockQty: z.coerce.number().int().nonnegative(),
   // Solo cuando la única variante activa no tiene nombre y hay que nombrarla.
   unnamedAttributeKey: z.string().trim().optional(),
   unnamedAttributeValue: z.string().trim().optional(),
+  // Solo Crisálidas; la marca se lee de la base.
+  chrysalisCount: z.string().optional(),
 });
+
+const CHRYSALIS_NOT_SAVED = "No se guardó el número de crisálidas; edítalo en la variante.";
+const PHOTO_NOT_SAVED = "No se pudo subir la foto; súbela desde la tarjeta de la variante.";
+
+/**
+ * Guarda chrysalis_count de una variante recién creada. Va después de la RPC
+ * (que no lo recibe): si falla, la variante ya existe y solo se avisa.
+ */
+async function saveChrysalisCount(variantId: string, count: number | null): Promise<string | null> {
+  if (count === null) return CHRYSALIS_NOT_SAVED;
+  const { error } = await createAdminClient()
+    .from("product_variants")
+    .update({ chrysalis_count: count })
+    .eq("id", variantId);
+  return error ? CHRYSALIS_NOT_SAVED : null;
+}
 
 export async function createVariant(
   formData: FormData,
-): Promise<{ ok: true; sku: string } | { ok: false; error: string }> {
+): Promise<{ ok: true; sku: string; warning: string | null } | { ok: false; error: string }> {
   const parsed = createVariantSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
@@ -176,20 +434,85 @@ export async function createVariant(
     return { ok: false, error: "Indica atributo y valor para nombrar la variante existente." };
   }
 
+  // La foto es opcional; se valida antes de crear nada para no dejar una variante a medias.
+  const photo = optionalImageFile(formData.get("photo"));
+  if (photo) {
+    const check = validateImageFile(photo);
+    if (!check.ok) return { ok: false, error: check.error };
+  }
+
   const supabase = createAdminClient();
+  const { data: product, error: productError } = await supabase
+    .from("products")
+    .select("brand")
+    .eq("id", input.productId)
+    .maybeSingle();
+  if (productError) return { ok: false, error: "No se pudo leer el producto. Inténtalo de nuevo." };
+  if (!product) return { ok: false, error: rpcErrorMessage("PRODUCTO_NO_EXISTE") };
+  const chrysalis = parseChrysalisCount(product.brand as string, input.chrysalisCount);
+  if (!chrysalis.ok) return { ok: false, error: chrysalis.error };
+
   const { data, error } = await supabase.rpc("create_variant_with_stock", {
     p_product: input.productId,
     p_attributes: attributes,
-    p_stock_qty: input.stockQty,
+    // Sin p_stock_qty (la RPC usa 0): la disponibilidad sale de los componentes.
     p_unnamed_variant_attributes: unnamed,
   });
-  const result = data as (RpcResult & { sku?: string }) | null;
-  if (error || !result?.ok || !result.sku) {
+  const result = data as (RpcResult & { sku?: string; variant_id?: string }) | null;
+  if (error || !result?.ok || !result.sku || !result.variant_id) {
     return { ok: false, error: rpcErrorMessage(result?.error, result?.mensaje ?? error?.message) };
   }
 
+  // Crisálidas y foto van después de la RPC (no los recibe): NO es atómico.
+  // Si fallan, la variante ya existe y solo se avisa.
+  const chrysalisWarning =
+    product.brand === "crisalidas" ? await saveChrysalisCount(result.variant_id, chrysalis.value) : null;
+  let photoWarning: string | null = null;
+  if (photo) {
+    const stored = await storeImage({ table: "product_variants", folder: "variants", id: result.variant_id }, photo);
+    if (!stored.ok) photoWarning = PHOTO_NOT_SAVED;
+  }
+  const warning = combineWarnings(chrysalisWarning, photoWarning);
+
   revalidatePath("/admin/productos");
-  return { ok: true, sku: result.sku };
+  revalidatePath("/admin/produccion");
+  return { ok: true, sku: result.sku, warning };
+}
+
+/**
+ * Edita chrysalis_count de una variante de Crisálidas. La marca sale del
+ * producto de la variante en la base; otras marcas no llevan crisálidas.
+ * Producción lo lee en vivo (/admin/produccion).
+ */
+export async function updateVariantChrysalisCount(variantId: string, count: number | null): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
+  if (!z.string().uuid().safeParse(variantId).success) return { error: "Variante inválida." };
+
+  const supabase = createAdminClient();
+  const { data, error: readError } = await supabase
+    .from("product_variants")
+    .select("id, products(sku, brand)")
+    .eq("id", variantId)
+    .maybeSingle();
+  if (readError) return { error: "No se pudo leer la variante. Inténtalo de nuevo." };
+  const product = (data?.products ?? null) as unknown as { sku: string; brand: string } | null;
+  if (!data || !product) return { error: rpcErrorMessage("VARIANTE_NO_EXISTE") };
+  if (product.brand !== "crisalidas") return { error: "Solo los productos de Crisálidas llevan crisálidas." };
+
+  const parsed = parseChrysalisCount(product.brand, count);
+  if (!parsed.ok) return { error: parsed.error };
+
+  const { error } = await supabase
+    .from("product_variants")
+    .update({ chrysalis_count: parsed.value })
+    .eq("id", variantId);
+  if (error) return { error: postgrestErrorMessage(error) };
+
+  revalidatePath(`/admin/productos/${product.sku}`);
+  revalidatePath("/admin/productos");
+  revalidatePath("/admin/produccion");
+  return { error: null };
 }
 
 export async function uploadVariantImage(

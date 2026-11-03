@@ -39,3 +39,27 @@ export function lineChrysalis(qty: number, chrysalisCount: number | null, option
   if (chrysalisCount === null) return null;
   return qty * (chrysalisCount + chrysalisExtrasPerUnit(options));
 }
+
+/** Upper bound of the panel input; the column only checks >= 0. */
+export const CHRYSALIS_COUNT_MAX = 999;
+
+/**
+ * product_variants.chrysalis_count as typed in the panel. Crisálidas: an
+ * integer 0..999, required (0 = carries none; NULL would mean "sin definir"
+ * and production would leave the line out of every total). Other brands
+ * carry no chrysalises: the value must be absent and is stored as NULL.
+ */
+export function parseChrysalisCount(
+  brand: string,
+  raw: unknown,
+): { ok: true; value: number | null } | { ok: false; error: string } {
+  const text = raw === undefined || raw === null ? "" : String(raw).trim();
+  if (brand !== "crisalidas") {
+    return text === "" ? { ok: true, value: null } : { ok: false, error: "Solo los productos de Crisálidas llevan crisálidas." };
+  }
+  if (text === "") return { ok: false, error: "Indica cuántas crisálidas lleva la variante (0 si no lleva)." };
+  if (!/^\d+$/.test(text)) return { ok: false, error: "Las crisálidas deben ser un número entero mayor o igual a 0." };
+  const value = Number(text);
+  if (value > CHRYSALIS_COUNT_MAX) return { ok: false, error: `Las crisálidas admiten máximo ${CHRYSALIS_COUNT_MAX}.` };
+  return { ok: true, value };
+}

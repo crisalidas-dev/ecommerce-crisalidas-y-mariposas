@@ -5,6 +5,7 @@ import {
   IMAGE_BUCKET,
   imageObjectPath,
   storagePathFromPublicUrl,
+  storagePathsForUrls,
   validateImageFile,
   type ImageFolder,
 } from "@/lib/domain/imageUpload";
@@ -109,4 +110,20 @@ export async function clearImage(target: ImageTarget): Promise<RemoveImageResult
   if (path) await supabase.storage.from(IMAGE_BUCKET).remove([path]);
 
   return { ok: true, sku: row.sku };
+}
+
+/**
+ * Removes the files of rows that were already deleted (delete_product returns
+ * their URLs). Best effort: a storage failure is logged and never fails the
+ * caller, whose rows are gone either way. Only paths inside our bucket.
+ */
+export async function removeStoredImages(urls: (string | null)[]): Promise<void> {
+  const paths = storagePathsForUrls(urls);
+  if (paths.length === 0) return;
+  try {
+    const { error } = await createAdminClient().storage.from(IMAGE_BUCKET).remove(paths);
+    if (error) console.error("removeStoredImages: no se pudieron borrar las fotos", paths, error.message);
+  } catch (err) {
+    console.error("removeStoredImages: no se pudieron borrar las fotos", paths, err);
+  }
 }

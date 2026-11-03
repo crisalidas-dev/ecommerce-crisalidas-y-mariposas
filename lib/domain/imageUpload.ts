@@ -51,3 +51,15 @@ export function storagePathFromPublicUrl(url: string | null, folder: ImageFolder
   if (parts.length !== 2 || parts[0] !== folder || !parts[1] || parts[1].includes("..")) return null;
   return path;
 }
+
+/**
+ * Storage paths of the given public URLs, in either image folder, without
+ * duplicates. URLs outside our bucket and folders are skipped: never deleted.
+ */
+export function storagePathsForUrls(urls: (string | null)[]): string[] {
+  const folders: ImageFolder[] = ["variants", "stock-items"];
+  const paths = urls
+    .map((url) => folders.map((folder) => storagePathFromPublicUrl(url, folder)).find((p) => p !== null) ?? null)
+    .filter((p): p is string => p !== null);
+  return [...new Set(paths)];
+}
