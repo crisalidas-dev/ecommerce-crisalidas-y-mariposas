@@ -66,6 +66,7 @@ export default async function ProtectedLayout({ children }: { children: ReactNod
           <NavLink href="/admin/produccion">Producción</NavLink>
           <NavLink href="/admin/despachos">Despachos</NavLink>
           <NavLink href="/admin/productos">Productos</NavLink>
+          <NavLink href="/admin/configuracion">Configuración</NavLink>
         </nav>
 
         <div className="hidden items-center gap-3 md:order-3 md:flex">
