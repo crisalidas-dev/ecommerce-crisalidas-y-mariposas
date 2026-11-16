@@ -49,3 +49,6 @@ next-env.d.ts
 
 # agents skills
 /.agents/skills/*
+
+# mcp committing
+/.mcp.json
