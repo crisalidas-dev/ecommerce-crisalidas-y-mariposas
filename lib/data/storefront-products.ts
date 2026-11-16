@@ -6,6 +6,7 @@ import {
   selectFeatured,
   selectRelated,
   type StorefrontProductRow,
+  unitsByVariantFromRows,
 } from "@/lib/domain/storefrontCatalog";
 import type { ColeccionFiltro, Producto } from "@/lib/domain/types";
 import { createAdminClient } from "@/lib/supabase/admin-client";
@@ -14,7 +15,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
  * Catálogo público. RLS está activo sin políticas en las tablas de producto, así
  * que el anon key no lee nada y la vista de disponibilidad es `security_invoker`:
  * se lee en servidor con `createAdminClient()`, seleccionando SOLO columnas
- * públicas (nunca `select("*")`, ni stock_qty/reserved_qty/costos). Ni el cliente
+ * públicas (nunca `select("*")`, ni stock_qty/costos). Ni el cliente
  * ni las filas crudas cruzan a componentes de cliente: salen `Producto`s ya
  * mapeados, sin unidades exactas.
  */
@@ -59,7 +60,7 @@ async function queryCatalog(productIds?: readonly string[]): Promise<FreshStoref
     .from("products")
     .select(
       "id, sku, name, brand, description, image_url, base_price, category, simbolismo, short_name, created_at, is_published, " +
-        "product_variants(id, sku, attributes, price_delta, image_url, is_active, short_name), " +
+        "product_variants(id, sku, attributes, price_delta, image_url, is_active, short_name, available_units), " +
         "product_options(id, name, price, max_qty, is_active)",
     )
     .eq("is_published", true)
@@ -71,18 +72,8 @@ async function queryCatalog(productIds?: readonly string[]): Promise<FreshStoref
   const rows = (data ?? []) as unknown as StorefrontProductRow[];
   if (rows.length === 0) return { products: [], unitsByVariant: new Map() };
 
-  const { data: avail, error: availError } = await supabase
-    .from("v_variant_availability")
-    .select("variant_id, available_units")
-    .in(
-      "product_id",
-      rows.map((r) => r.id),
-    );
-  if (availError) throw availError;
-
-  const unitsByVariant = new Map<string, number>(
-    (avail ?? []).map((a) => [a.variant_id as string, Number(a.available_units)]),
-  );
+  // `available_units` is a computed column on product_variants (stock minus live reservations).
+  const unitsByVariant = unitsByVariantFromRows(rows);
 
   return { products: mapStorefrontProducts(rows, unitsByVariant), unitsByVariant };
 }

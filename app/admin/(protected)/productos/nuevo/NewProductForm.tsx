@@ -12,6 +12,8 @@ import { createProduct, type FormState } from "../actions";
 import { DescriptionField, SimbolismoField } from "../ProductCopyFields";
 import { ProductNameFields } from "../ProductNameFields";
 import { ChrysalisCountField } from "../ChrysalisCountField";
+import { VariantStockField } from "../VariantStockField";
+import { parseVariantStock } from "@/lib/domain/variantStock";
 import { parseChrysalisCount } from "@/lib/domain/chrysalis";
 import { CRISALIDAS_COLLECTIONS, PRODUCT_TYPES } from "../productTypes";
 import { SkuHelpButton } from "../SkuHelpButton";
@@ -42,6 +44,7 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
   const [basePrice, setBasePrice] = useState<number | null>(null);
   const [attributeKey, setAttributeKey] = useState("");
   const [chrysalisCount, setChrysalisCount] = useState("");
+  const [stockQty, setStockQty] = useState("");
 
   const brandLines = activeLinesOfBrand(lines, brand);
   const line = brandLines.find((l) => l.id === lineChoice) ?? null;
@@ -53,6 +56,7 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
   const sheetErrors = productSheetErrors({ brand, name, simbolismo, shortName: shortName.value });
   const sheetInvalid = Boolean(sheetErrors.simbolismo || sheetErrors.shortName);
   // Solo Crisálidas lleva crisálidas; en Complementos el campo no existe.
+  const stockInvalid = !parseVariantStock(stockQty).ok;
   const chrysalisInvalid = !parseChrysalisCount(brand, brand === "crisalidas" ? chrysalisCount : "").ok;
 
   return (
@@ -202,11 +206,9 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
             <output aria-live="polite" className="flex min-h-11 items-center font-admin-mono text-sm font-semibold text-admin-ink">
               {variantSku ?? "—"}
             </output>
-            <p className={helpTextClass}>
-              La disponibilidad se calcula con los componentes (insumos) del producto: se asignan en el editor del
-              producto después de crearlo.
-            </p>
           </div>
+
+          <VariantStockField id="stockQty" name="stockQty" value={stockQty} onChange={setStockQty} className="sm:col-span-2" />
 
           {brand === "crisalidas" ? (
             <ChrysalisCountField
@@ -225,7 +227,7 @@ export function NewProductForm({ lines: initialLines }: { lines: ProductLine[] }
       <div className="flex flex-col gap-4 md:col-span-5">
         <ActionStatus message={state.error ? { tone: "error", text: state.error } : null} />
 
-        <button type="submit" disabled={pending || !line || Boolean(valueError) || sheetInvalid || chrysalisInvalid} className={`${primaryButtonClass} w-fit`}>
+        <button type="submit" disabled={pending || !line || Boolean(valueError) || sheetInvalid || chrysalisInvalid || stockInvalid} className={`${primaryButtonClass} w-fit`}>
           {pending ? "Creando..." : "Crear producto"}
         </button>
       </div>

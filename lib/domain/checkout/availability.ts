@@ -7,7 +7,7 @@ import type { Producto } from "../types.ts";
  * reads and classifies; stock is held later, at Summary -> Pay (slice 4).
  *
  * Pure: the server hands in a FRESH catalog (not the 5-minute cache) plus the
- * available units per variant (`v_variant_availability.available_units`).
+ * available units per variant (`product_variants.available_units`).
  * `disponibilidad` governs through `canAddToCart`: `Bajo pedido` with zero
  * units is sellable. Units are only compared for `Disponible` products.
  */

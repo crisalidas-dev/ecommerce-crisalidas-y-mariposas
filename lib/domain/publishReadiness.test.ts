@@ -2,94 +2,33 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   UNPUBLISHED_NOTICE,
-  editableRecipeRows,
-  isSelfOnlyVariant,
   unpublishedNotice,
   variantAvailabilityLabel,
   variantDeleteBlock,
   variantStatusDisplay,
 } from "./publishReadiness.ts";
 
-const variant = (
-  sku: string,
-  components: { stockItemId: string; qtyRequired: number }[],
-  overrides: { is_active?: boolean; selfItemId?: string | null } = {},
-) => ({ sku, is_active: true, selfItemId: `self-${sku}`, components, ...overrides });
-
-describe("isSelfOnlyVariant", () => {
-  it("is true when the only component is the variant's own self item", () => {
-    assert.equal(isSelfOnlyVariant(variant("A-V01", [{ stockItemId: "self-A-V01", qtyRequired: 1 }])), true);
-  });
-  it("is false with real components", () => {
-    assert.equal(isSelfOnlyVariant(variant("A-V01", [{ stockItemId: "caja", qtyRequired: 1 }])), false);
-    assert.equal(
-      isSelfOnlyVariant(
-        variant("A-V01", [
-          { stockItemId: "self-A-V01", qtyRequired: 1 },
-          { stockItemId: "caja", qtyRequired: 1 },
-        ]),
-      ),
-      false,
-    );
-  });
-  it("is false without a self item or without components", () => {
-    assert.equal(isSelfOnlyVariant(variant("A-V01", [{ stockItemId: "x", qtyRequired: 1 }], { selfItemId: null })), false);
-    assert.equal(isSelfOnlyVariant(variant("A-V01", [])), false);
-  });
+const variant = (sku: string, overrides: { is_active?: boolean; chrysalisCount?: number | null } = {}) => ({
+  sku,
+  is_active: true,
+  ...overrides,
 });
 
 describe("unpublishedNotice", () => {
   it("is null for a published product", () => {
-    assert.equal(unpublishedNotice(true, [variant("A-V01", [{ stockItemId: "self-A-V01", qtyRequired: 1 }])]), null);
+    assert.equal(unpublishedNotice(true, [variant("A-V01")]), null);
   });
-  it("is the base notice when every active variant has its insumos", () => {
-    assert.equal(unpublishedNotice(false, [variant("A-V01", [{ stockItemId: "caja", qtyRequired: 1 }])]), UNPUBLISHED_NOTICE);
-    assert.equal(UNPUBLISHED_NOTICE, "Producto sin publicar: asigna los insumos de cada variante y luego publícalo.");
-  });
-  it("names the active variants that still only use their own stock", () => {
-    const text = unpublishedNotice(false, [
-      variant("A-V01", [{ stockItemId: "self-A-V01", qtyRequired: 1 }]),
-      variant("A-V02", [{ stockItemId: "caja", qtyRequired: 1 }]),
-      variant("A-V03", [{ stockItemId: "self-A-V03", qtyRequired: 1 }]),
-    ]);
-    assert.ok(text?.startsWith(UNPUBLISHED_NOTICE));
-    assert.match(text ?? "", /A-V01, A-V03/);
-    assert.doesNotMatch(text ?? "", /A-V02/);
-  });
-  it("ignores inactive variants", () => {
-    const text = unpublishedNotice(false, [
-      variant("A-V01", [{ stockItemId: "self-A-V01", qtyRequired: 1 }], { is_active: false }),
-    ]);
-    assert.equal(text, UNPUBLISHED_NOTICE);
-  });
-});
-
-describe("editableRecipeRows", () => {
-  it("hides the mirror item: a self-only variant edits an empty recipe", () => {
-    assert.deepEqual(editableRecipeRows(variant("A-V01", [{ stockItemId: "self-A-V01", qtyRequired: 1 }])), []);
-  });
-  it("keeps real components as they are", () => {
-    const components = [
-      { stockItemId: "caja", qtyRequired: 1 },
-      { stockItemId: "crisalida", qtyRequired: 2 },
-    ];
-    assert.deepEqual(editableRecipeRows(variant("A-V01", components)), components);
+  it("is the base notice and never asks for insumos", () => {
+    assert.equal(unpublishedNotice(false, [variant("A-V01")]), UNPUBLISHED_NOTICE);
+    assert.equal(UNPUBLISHED_NOTICE, "Producto sin publicar: revisa el stock de cada variante y luego publícalo.");
+    assert.doesNotMatch(UNPUBLISHED_NOTICE, /insumo/i);
   });
 });
 
 describe("variantAvailabilityLabel", () => {
-  const self = { ...variant("A-V01", [{ stockItemId: "self-A-V01", qtyRequired: 1 }]), availableUnits: 0 };
-  it("says no insumos are assigned for a self-only variant, never the mirror as bottleneck", () => {
-    assert.equal(variantAvailabilityLabel(self, "encanto (Blanco)"), "Disponible: 0 · sin insumos asignados");
-  });
-  it("names the bottleneck for a real recipe", () => {
-    const v = { ...variant("A-V01", [{ stockItemId: "caja", qtyRequired: 1 }]), availableUnits: 3 };
-    assert.equal(variantAvailabilityLabel(v, "Caja kraft"), "Disponible: 3 · limita: Caja kraft");
-    assert.equal(variantAvailabilityLabel(v, null), "Disponible: 3");
-  });
-  it("flags a variant without components", () => {
-    const v = { ...variant("A-V01", []), availableUnits: 0 };
-    assert.equal(variantAvailabilityLabel(v, null), "Disponible: 0 · sin componentes");
+  it("shows the sellable units of the variant", () => {
+    assert.equal(variantAvailabilityLabel({ availableUnits: 3 }), "Disponible: 3");
+    assert.equal(variantAvailabilityLabel({ availableUnits: 0 }), "Disponible: 0");
   });
 });
 
@@ -135,17 +74,18 @@ describe("variantDeleteBlock", () => {
 });
 
 describe("unpublishedNotice with chrysalis counts", () => {
-  const withCount = (sku: string, chrysalisCount: number | null) => ({
-    ...variant(sku, [{ stockItemId: "caja", qtyRequired: 1 }]),
-    chrysalisCount,
-  });
+  const withCount = (sku: string, chrysalisCount: number | null) => variant(sku, { chrysalisCount });
   it("lists active crisalidas variants whose chrysalis count is undefined", () => {
     const text = unpublishedNotice(false, [withCount("A-V01", null), withCount("A-V02", 2)], "crisalidas");
     assert.match(text ?? "", /Crisálidas sin definir: A-V01\./);
     assert.doesNotMatch(text ?? "", /A-V02/);
   });
-  it("treats 0 as defined and ignores complementos", () => {
+  it("treats 0 as defined, ignores complementos and inactive variants", () => {
     assert.equal(unpublishedNotice(false, [withCount("A-V01", 0)], "crisalidas"), UNPUBLISHED_NOTICE);
     assert.equal(unpublishedNotice(false, [withCount("A-V01", null)], "complementos"), UNPUBLISHED_NOTICE);
+    assert.equal(
+      unpublishedNotice(false, [variant("A-V01", { is_active: false, chrysalisCount: null })], "crisalidas"),
+      UNPUBLISHED_NOTICE,
+    );
   });
 });

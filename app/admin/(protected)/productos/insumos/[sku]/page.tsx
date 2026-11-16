@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
-import { getStockItemBySku, type StockItemUsage } from "@/lib/data/stock-items";
+import { getStockItemBySku } from "@/lib/data/stock-items";
 import { ActionStatus } from "../../../ui/ActionStatus";
 import { BackLink } from "../../../ui/BackLink";
 import { InventoryTabs } from "../../InventoryTabs";
@@ -30,7 +30,7 @@ export default async function InsumoDetailPage({
   const { foto } = await searchParams;
   const detail = await getStockItemBySku(decodeURIComponent(sku));
   if (!detail) notFound();
-  const { item, usage, movements } = detail;
+  const { item, movements } = detail;
 
   return (
     <div className="animate-view-in flex flex-col gap-6">
@@ -42,13 +42,7 @@ export default async function InsumoDetailPage({
           <p className="flex flex-wrap items-center gap-x-1.5 text-xs text-admin-ink-muted">
             <span className="font-admin-mono">{item.sku}</span>
             <span aria-hidden="true">·</span>
-            <span>{item.kind === "self" ? "Espejo de variante" : "Insumo"}</span>
-            {item.origin ? (
-              <>
-                <span aria-hidden="true">·</span>
-                <span>{ORIGIN_LABEL[item.origin]}</span>
-              </>
-            ) : null}
+            <span>{ORIGIN_LABEL[item.origin]}</span>
             {item.isActive ? null : (
               <span className="rounded-full bg-admin-warning-bg px-2 py-0.5 text-admin-warning-fg">
                 Inactivo
@@ -73,8 +67,6 @@ export default async function InsumoDetailPage({
             <h2 className="text-sm font-semibold text-admin-ink">Datos</h2>
             <StockItemForm item={item} />
           </section>
-
-          <UsageSection usage={usage} />
         </div>
 
         <div className="flex min-w-0 flex-col gap-6 md:col-span-2">
@@ -87,8 +79,6 @@ export default async function InsumoDetailPage({
                 id: item.id,
                 sku: item.sku,
                 stockQty: item.stockQty,
-                reserved: item.reserved,
-                available: item.available,
                 isActive: item.isActive,
                 unit: item.unit,
               }}
@@ -136,37 +126,5 @@ export default async function InsumoDetailPage({
         </div>
       </section>
     </div>
-  );
-}
-
-function UsageSection({ usage }: { usage: StockItemUsage }) {
-  return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-admin-ink">Usado en</h2>
-      {usage.products.length + usage.options.length === 0 ? (
-        <p className="rounded-xl bg-admin-surface-raised p-4 text-sm text-admin-ink-muted shadow-admin-card">
-          Ningún producto lo usa como componente todavía.
-        </p>
-      ) : (
-        <ul className="flex flex-col gap-1 rounded-xl bg-admin-surface-raised p-4 text-sm text-admin-ink-secondary shadow-admin-card">
-          {usage.products.map((p) => (
-            <li key={`p-${p.productSku}`}>
-              {p.productName}
-              {p.uniformQty !== null ? ` × ${p.uniformQty}` : ""}
-              {p.showVariants
-                ? ` (${p.variants
-                    .map((v) => `${v.label || "Única"}${p.uniformQty === null ? ` × ${v.qtyRequired}` : ""}`)
-                    .join(", ")})`
-                : ""}
-            </li>
-          ))}
-          {usage.options.map((o, i) => (
-            <li key={`o-${i}`}>
-              Adicional «{o.name}»{o.productName ? ` de ${o.productName}` : ""} × {o.qtyRequired}
-            </li>
-          ))}
-        </ul>
-      )}
-    </section>
   );
 }

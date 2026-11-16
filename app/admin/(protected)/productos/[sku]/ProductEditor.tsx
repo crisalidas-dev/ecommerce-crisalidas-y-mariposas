@@ -3,15 +3,8 @@
 import Image from "next/image";
 import { useRouter } from "next/navigation";
 import { useId, useRef, useState, useTransition } from "react";
-import type { OptionRow, ProductDetail, VariantRow } from "@/lib/data/admin-products";
-import type { StockItemRow } from "@/lib/data/stock-items";
-import {
-  computeRecipeAvailability,
-  recipeCandidates,
-  rpcErrorMessage,
-  validateRecipeRows,
-} from "@/lib/domain/stockRecipe";
-import { searchByText } from "@/lib/domain/textSearch";
+import type { ProductDetail, VariantRow } from "@/lib/data/admin-products";
+import { parseVariantStock } from "@/lib/domain/variantStock";
 import {
   createVariant,
   deleteProduct,
@@ -24,12 +17,11 @@ import {
   updateProductName,
   updateVariantAttributes,
   updateVariantChrysalisCount,
+  updateVariantStock,
   uploadVariantImage,
 } from "../actions";
 import { parseProductCopy, parseProductName, shortNameField } from "@/lib/domain/productSheet";
 import {
-  editableRecipeRows,
-  isSelfOnlyVariant,
   unpublishedNotice,
   variantAvailabilityLabel,
   variantDeleteBlock,
@@ -38,10 +30,10 @@ import {
 import { DescriptionField, SimbolismoField } from "../ProductCopyFields";
 import { ProductNameFields } from "../ProductNameFields";
 import { ChrysalisCountField } from "../ChrysalisCountField";
+import { VariantStockField } from "../VariantStockField";
 import { parseChrysalisCount } from "@/lib/domain/chrysalis";
 import { CopInput } from "../../ui/CopInput";
 import { PhotoPicker } from "../../ui/PhotoPicker";
-import { SearchCombobox } from "../../ui/SearchCombobox";
 import { Switch } from "../../ui/Switch";
 import {
   VARIANT_NAME_MAX,
@@ -67,7 +59,6 @@ import {
   primaryButtonClass,
   secondaryButtonClass,
 } from "../../ui/formClasses";
-import { saveOptionRecipe, saveVariantRecipe } from "../insumos/actions";
 
 const CARD_CLASS = "rounded-xl border border-transparent bg-admin-surface-raised shadow-admin-card";
 const PUBLISH_ERROR = "No se pudo cambiar la publicación. Inténtalo de nuevo.";
@@ -118,7 +109,7 @@ export function ProductEditor({ product }: { product: ProductDetail }) {
           message={publishError ? { tone: "error", text: publishError } : null}
           className="w-full text-xs"
         />
-        {/* Se crea sin publicar: con 0 unidades saldría "Agotado" en la tienda. */}
+        {/* Se crea sin publicar: hay que revisar el stock de cada variante antes de mostrarla. */}
         <ActionStatus
           message={notice ? { tone: "warn", text: notice } : null}
           className="w-full text-sm"
@@ -150,7 +141,6 @@ export function ProductEditor({ product }: { product: ProductDetail }) {
           <VariantCard
             key={variant.id}
             variant={variant}
-            stockItems={product.stockItems}
             productPublished={published}
             carriesChrysalis={product.brand === "crisalidas"}
             variantCount={product.variants.length}
@@ -169,18 +159,6 @@ export function ProductEditor({ product }: { product: ProductDetail }) {
         lastVariantNumber={product.lastVariantNumber}
         carriesChrysalis={product.brand === "crisalidas"}
       />
-
-      {product.options.length > 0 ? (
-        <div className="flex flex-col gap-3">
-          <h2 className="text-sm font-semibold text-admin-ink">Adicionales</h2>
-          <p className="text-xs text-admin-ink-muted">
-            Insumos que consume cada adicional por unidad. Vacío significa que no descuenta inventario.
-          </p>
-          {product.options.map((option) => (
-            <OptionCard key={option.id} option={option} stockItems={product.stockItems} />
-          ))}
-        </div>
-      ) : null}
 
       <DangerZone product={product} />
     </div>
@@ -325,7 +303,7 @@ function DangerZone({ product }: { product: ProductDetail }) {
         </p>
       ) : (
         <p id="delete-help" className={helpTextClass}>
-          Elimina el producto con sus variantes, recetas y fotos. Los insumos compartidos se conservan.
+          Elimina el producto con sus variantes y fotos.
         </p>
       )}
       <button
@@ -341,7 +319,7 @@ function DangerZone({ product }: { product: ProductDetail }) {
       <ConfirmDialog
         open={confirming}
         title={`¿Eliminar ${product.name}?`}
-        description={`Se eliminará ${product.name} con sus variantes, recetas y fotos. No se puede deshacer.`}
+        description={`Se eliminará ${product.name} con sus variantes y fotos. No se puede deshacer.`}
         confirmLabel="Eliminar"
         tone="danger"
         onCancel={() => setConfirming(false)}
@@ -416,14 +394,12 @@ function ProductCopyForm({ product }: { product: ProductDetail }) {
 
 function VariantCard({
   variant,
-  stockItems,
   productPublished,
   carriesChrysalis,
   variantCount,
   siblings,
 }: {
   variant: VariantRow;
-  stockItems: StockItemRow[];
   productPublished: boolean;
   carriesChrysalis: boolean;
   variantCount: number;
@@ -433,9 +409,6 @@ function VariantCard({
   const router = useRouter();
   const deleteBlock = variantDeleteBlock(variant, variantCount);
   const [confirmingDelete, setConfirmingDelete] = useState(false);
-  // Sin insumos asignados: su único componente es su insumo espejo (stock 0).
-  const selfOnly = isSelfOnlyVariant(variant);
-  const bottleneck = stockItems.find((i) => i.id === variant.bottleneckItemId) ?? null;
   const [active, setActive] = useState(variant.is_active);
   const status = variantStatusDisplay(productPublished, active);
   const [imageUrl, setImageUrl] = useState(variant.image_url);
@@ -551,8 +524,8 @@ function VariantCard({
             />
           ) : null}
           <p className="font-admin-mono text-xs text-admin-ink-secondary">{variant.sku}</p>
-          <p className="text-sm text-admin-ink-secondary">{variantAvailabilityLabel(variant, bottleneck?.name ?? null)}</p>
-          <p className={helpTextClass}>Las unidades se calculan con los componentes (insumos) de la variante.</p>
+          <p className="text-sm text-admin-ink-secondary">{variantAvailabilityLabel(variant)}</p>
+          <VariantStockEditor variantId={variant.id} variantLabel={variantLabel} initial={variant.stockQty} />
           {carriesChrysalis ? <ChrysalisCountEditor variantId={variant.id} variantLabel={variantLabel} initial={variant.chrysalisCount} /> : null}
         </div>
 
@@ -636,7 +609,7 @@ function VariantCard({
       <ConfirmDialog
         open={confirmingDelete}
         title={`¿Eliminar la variante ${variantLabel}?`}
-        description={`Se eliminará la variante ${title.unnamed ? variant.sku : `${variantLabel} (${variant.sku})`} con su receta y su foto. No se puede deshacer.`}
+        description={`Se eliminará la variante ${title.unnamed ? variant.sku : `${variantLabel} (${variant.sku})`} con su foto. No se puede deshacer.`}
         confirmLabel="Eliminar"
         tone="danger"
         onCancel={() => setConfirmingDelete(false)}
@@ -687,20 +660,6 @@ function VariantCard({
           });
         }}
       />
-
-      {/* Abierto mientras la variante no tenga insumos: es lo primero por hacer. */}
-      <details className="border-t border-admin-border px-4 pb-4" open={variant.components.length === 0 || selfOnly}>
-        <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-admin-ink-secondary">
-          Componentes
-        </summary>
-        {/* El insumo espejo nunca aparece como fila: una variante sin insumos edita una receta vacía. */}
-        <RecipeEditor
-          initialRows={editableRecipeRows(variant)}
-          stockItems={stockItems}
-          allowEmpty={false}
-          onSave={(rows) => saveVariantRecipe(variant.id, rows)}
-        />
-      </details>
     </div>
   );
 }
@@ -891,180 +850,96 @@ function ChrysalisCountEditor({
   );
 }
 
-function OptionCard({ option, stockItems }: { option: OptionRow; stockItems: StockItemRow[] }) {
-  return (
-    <details className={`p-3 ${CARD_CLASS}`} open={option.components.length > 0}>
-      <summary className="min-h-11 cursor-pointer py-3 text-sm font-medium text-admin-ink">{option.name}</summary>
-      <RecipeEditor
-        initialRows={option.components}
-        stockItems={stockItems}
-        allowEmpty
-        showUnits={false}
-        onSave={(rows) => saveOptionRecipe(option.id, rows)}
-      />
-    </details>
-  );
-}
-
-interface EditableRow {
-  /** Clave estable de la fila: cada buscador conserva su texto al quitar otra fila. */
-  uid: number;
-  stockItemId: string;
-  qty: number;
-}
-
-function searchStockItems(items: StockItemRow[], query: string): StockItemRow[] {
-  return searchByText(items, query, (i) => [i.name, i.sku]);
-}
-
-/** Editor de receta con vista previa de unidades y cuello de botella calculada en el cliente. */
-function RecipeEditor({
-  initialRows,
-  stockItems,
-  allowEmpty,
-  showUnits = true,
-  onSave,
+/** "Stock: N" with inline edit. Sellable units = stock minus live reservations (`available_units`). */
+function VariantStockEditor({
+  variantId,
+  variantLabel,
+  initial,
 }: {
-  initialRows: { stockItemId: string; qtyRequired: number }[];
-  stockItems: StockItemRow[];
-  allowEmpty: boolean;
-  showUnits?: boolean;
-  onSave: (
-    rows: { stockItemId: string; qtyRequired: number }[],
-  ) => Promise<{ ok: true; availableUnits: number | null } | { ok: false; error: string }>;
+  variantId: string;
+  variantLabel: string;
+  initial: number;
 }) {
   const router = useRouter();
-  const [rows, setRows] = useState<EditableRow[]>(
-    initialRows.map((r, i) => ({ uid: i, stockItemId: r.stockItemId, qty: r.qtyRequired })),
-  );
-  const nextUid = useRef(initialRows.length);
-  const [message, setMessage] = useState<{ error: boolean; text: string } | null>(null);
+  const inputId = useId();
+  const [saved, setSaved] = useState(initial);
+  const [editing, setEditing] = useState(false);
+  const [value, setValue] = useState(String(initial));
+  const [error, setError] = useState<string | null>(null);
   const [pending, startTransition] = useTransition();
+  const check = parseVariantStock(value);
 
-  const byId = Object.fromEntries(stockItems.map((i) => [i.id, i]));
-  const availability = Object.fromEntries(
-    stockItems.map((i) => [i.id, { available: i.available, isActive: i.isActive }]),
-  );
-  const recipe = rows.map((r) => ({ stockItemId: r.stockItemId, qtyRequired: r.qty }));
-  const validation = validateRecipeRows(recipe, { allowEmpty });
-  const preview = computeRecipeAvailability(recipe, availability);
-  const bottleneck = preview.bottleneckItemId ? byId[preview.bottleneckItemId] : null;
-
-  // Insumos activos que aún no están en la receta; nunca los espejo de variante.
-  const pickable = recipeCandidates(stockItems, rows.map((r) => r.stockItemId));
-
-  const update = (index: number, patch: Partial<EditableRow>) =>
-    setRows((prev) => prev.map((r, i) => (i === index ? { ...r, ...patch } : r)));
-
-  return (
-    <div className="mt-3 flex flex-col gap-3">
-      {rows.map((row, index) => (
-        <div key={row.uid} className="flex flex-wrap items-start gap-2">
-          <SearchCombobox
-            className="min-w-[14rem] flex-1"
-            // La fila muestra su insumo elegido aunque ya no esté entre los disponibles.
-            options={byId[row.stockItemId] ? [byId[row.stockItemId], ...pickable] : pickable}
-            search={searchStockItems}
-            getKey={(i) => i.id}
-            getInputLabel={(i) => i.name}
-            renderOption={(i) => (
-              <>
-                <span className="min-w-0 flex-1">{i.name}</span>
-                <span className="font-admin-mono text-xs text-admin-ink-muted">{i.sku}</span>
-                <span
-                  className={`shrink-0 rounded-full px-2 py-0.5 text-xs font-semibold tabular-nums ${
-                    i.available > 0 ? "text-admin-ink-secondary" : "bg-admin-critical-bg text-admin-critical-fg"
-                  }`}
-                >
-                  {i.available} disp.
-                </span>
-              </>
-            )}
-            value={row.stockItemId}
-            onChange={(id) => update(index, { stockItemId: id })}
-            label="Insumo"
-            hideLabel
-            listLabel="Insumos disponibles"
-            placeholder="Buscar insumo por nombre o SKU…"
-            emptyState={(q) => (
-              <span>
-                Sin resultados para &quot;{q}&quot;.{" "}
-                <a
-                  href="/admin/productos/insumos/nuevo"
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-medium text-admin-accent underline underline-offset-2"
-                >
-                  Crear insumo nuevo (pestaña nueva)
-                </a>
-              </span>
-            )}
-          />
-          <input
-            type="number"
-            min={1}
-            step={1}
-            value={row.qty}
-            onChange={(e) => update(index, { qty: Number(e.target.value) })}
-            aria-label="Cantidad requerida"
-            className={`${inputClass} w-24 font-admin-mono`}
-          />
-          <button
-            type="button"
-            onClick={() => setRows((prev) => prev.filter((_, i) => i !== index))}
-            className={secondaryButtonClass}
-          >
-            Quitar
-          </button>
-        </div>
-      ))}
-
-      <div className="flex flex-wrap items-center gap-3">
-        <button
-          type="button"
-          disabled={pickable.length === 0}
-          onClick={() => setRows((prev) => [...prev, { uid: nextUid.current++, stockItemId: "", qty: 1 }])}
-          className={`${secondaryButtonClass} border-dashed border-admin-border-strong`}
-        >
-          Agregar insumo
-        </button>
-        {showUnits ? (
-          <p className="text-xs text-admin-ink-muted">
-            Vista previa: <span className="font-admin-mono font-medium text-admin-ink">{preview.availableUnits}</span>{" "}
-            unidades
-            {bottleneck ? ` · limita: ${bottleneck.name}${bottleneck.isActive ? "" : " (inactivo)"}` : ""}
-          </p>
-        ) : null}
-        <button
-          type="button"
-          disabled={pending || !validation.ok}
-          onClick={() =>
-            startTransition(async () => {
-              const res = await onSave(recipe);
-              if (res.ok) {
-                setMessage({
-                  error: false,
-                  text: res.availableUnits === null ? "Componentes guardados." : `Componentes guardados: ${res.availableUnits} unidades.`,
-                });
-                router.refresh();
-              } else {
-                setMessage({ error: true, text: res.error });
-              }
-            })
-          }
-          className={`${primaryButtonClass} ml-auto`}
-        >
-          Guardar componentes
+  if (!editing) {
+    return (
+      <div className="flex flex-wrap items-center gap-2">
+        <span className="text-sm text-admin-ink-secondary">Stock: {saved}</span>
+        <button type="button" onClick={() => setEditing(true)} className={secondaryButtonClass}>
+          Editar<span className="sr-only"> stock de {variantLabel}</span>
         </button>
       </div>
+    );
+  }
 
-      {!validation.ok ? (
-        <p className="text-xs text-admin-warning-fg">{rpcErrorMessage(validation.error)}</p>
-      ) : null}
-      <ActionStatus
-        message={message ? { tone: message.error ? "error" : "ok", text: message.text } : null}
-        className="text-xs"
-      />
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <label htmlFor={inputId} className={labelClass}>
+            Stock de la variante
+          </label>
+          <input
+            id={inputId}
+            type="number"
+            inputMode="numeric"
+            min={0}
+            step={1}
+            value={value}
+            onChange={(e) => setValue(e.target.value)}
+            aria-invalid={value.trim() && !check.ok ? true : undefined}
+            className={`${inputClass} w-24 font-admin-mono`}
+          />
+        </div>
+        <button
+          type="button"
+          disabled={pending || !check.ok}
+          onClick={() => {
+            if (!check.ok) return;
+            setError(null);
+            startTransition(async () => {
+              try {
+                const res = await updateVariantStock(variantId, check.value);
+                if (res.error) {
+                  setError(res.error);
+                  return;
+                }
+                setSaved(check.value);
+                setEditing(false);
+                router.refresh();
+              } catch {
+                setError("No se pudo guardar. Inténtalo de nuevo.");
+              }
+            });
+          }}
+          className={primaryButtonClass}
+        >
+          Guardar<span className="sr-only"> stock de {variantLabel}</span>
+        </button>
+        <button
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            setEditing(false);
+            setError(null);
+            setValue(String(saved));
+          }}
+          className={secondaryButtonClass}
+        >
+          Cancelar
+        </button>
+      </div>
+      <p className={helpTextClass}>Existencias base. Las reservas activas se descuentan al vender.</p>
+      {!check.ok && value.trim() ? <p className={`${helpTextClass} text-admin-warning-fg`}>{check.error}</p> : null}
+      <ActionStatus message={error ? { tone: "error", text: error } : null} className="text-sm" />
     </div>
   );
 }
@@ -1086,6 +961,7 @@ function AddVariantForm({
   const [editedKey, setEditedKey] = useState<string | null>(null);
   const [attributeValue, setAttributeValue] = useState("");
   const [chrysalisCount, setChrysalisCount] = useState("");
+  const [stockQty, setStockQty] = useState("");
   const [unnamedKey, setUnnamedKey] = useState("");
   const [unnamedValue, setUnnamedValue] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -1094,6 +970,7 @@ function AddVariantForm({
   const keyId = useId();
   const valueId = useId();
   const chrysalisId = useId();
+  const stockId = useId();
   const unnamedKeyId = useId();
   const unnamedValueId = useId();
   const [pending, startTransition] = useTransition();
@@ -1108,6 +985,7 @@ function AddVariantForm({
     variantNameError(unnamedValue) !== null ||
     (unnamed !== null && (unnamedKey.trim() === "" || unnamedValue.trim() === "")) ||
     (unnamed !== null && (attributeKey.trim() === "" || attributeValue.trim() === "")) ||
+    !parseVariantStock(stockQty).ok ||
     (carriesChrysalis && !parseChrysalisCount("crisalidas", chrysalisCount).ok);
 
   const fieldRow = "grid grid-cols-1 gap-4 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] sm:items-start";
@@ -1127,6 +1005,7 @@ function AddVariantForm({
         fd.set("productId", productId);
         fd.set("attributeKey", attributeKey);
         fd.set("attributeValue", attributeValue);
+        fd.set("stockQty", stockQty);
         if (carriesChrysalis) fd.set("chrysalisCount", chrysalisCount);
         if (unnamed) {
           fd.set("unnamedAttributeKey", unnamedKey);
@@ -1141,6 +1020,7 @@ function AddVariantForm({
             setEditedKey(null);
             setAttributeValue("");
             setChrysalisCount("");
+            setStockQty("");
             setUnnamedKey("");
             setUnnamedValue("");
             // PhotoPicker escucha el reset del formulario y vacía archivo y vista previa.
@@ -1246,6 +1126,7 @@ function AddVariantForm({
           {carriesChrysalis ? (
             <ChrysalisCountField id={chrysalisId} value={chrysalisCount} onChange={setChrysalisCount} />
           ) : null}
+          <VariantStockField id={stockId} value={stockQty} onChange={setStockQty} />
         </div>
         <PhotoPicker />
       </section>
@@ -1265,8 +1146,7 @@ function AddVariantForm({
 
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <p className={helpTextClass}>
-          La disponibilidad se calcula con los componentes (insumos) de la variante: asígnalos en su tarjeta después de
-          agregarla.
+          El stock inicial es opcional (0 si lo dejas vacío); puedes editarlo después en la tarjeta de la variante.
         </p>
         <button type="submit" disabled={pending || invalid} className={`${primaryButtonClass} shrink-0 self-end`}>
           {pending ? "Guardando..." : unnamed ? "Nombrar y agregar variante" : "Agregar variante"}

@@ -10,6 +10,7 @@ import {
   selectRelated,
   skuToSlug,
   toCop,
+  unitsByVariantFromRows,
   variantLabel,
   type StorefrontProductRow,
 } from "./storefrontCatalog.ts";
@@ -292,5 +293,29 @@ describe("selectRelated", () => {
       selectRelated(ps, bySku("COM-NEW"), 4).map((p) => p.sku),
       ["COM-OLD"],
     );
+  });
+});
+
+describe("unitsByVariantFromRows", () => {
+  it("reads the computed available_units embedded in each variant", () => {
+    const base = row();
+    const v = base.product_variants![0];
+    const rows = [
+      row({
+        product_variants: [
+          { ...v, id: "v1", available_units: 3 },
+          { ...v, id: "v2", available_units: "5" },
+          { ...v, id: "v3", available_units: null },
+          { ...v, id: "v4" },
+        ],
+      }),
+      row({ id: "p2", product_variants: null }),
+    ];
+    const m = unitsByVariantFromRows(rows);
+    assert.equal(m.get("v1"), 3);
+    assert.equal(m.get("v2"), 5);
+    assert.equal(m.get("v3"), 0);
+    assert.equal(m.get("v4"), 0);
+    assert.equal(m.size, 4);
   });
 });

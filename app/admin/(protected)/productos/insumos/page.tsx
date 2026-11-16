@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
-import { getRecentMovementsByItem, getStockItemUsage, getStockItems } from "@/lib/data/stock-items";
+import { getRecentMovementsByItem, getStockItems } from "@/lib/data/stock-items";
 import { classifyStock, STOCK_LEVEL_LABEL } from "@/lib/domain/stockLevel";
 import { chipClass, primaryButtonClass, secondaryButtonClass } from "../../ui/formClasses";
 import { InventoryTabs } from "../InventoryTabs";
@@ -16,9 +16,8 @@ export default async function InsumosPage({
   searchParams: Promise<{ estado?: string }>;
 }) {
   const { estado } = await searchParams;
-  const [allItems, usage, movements] = await Promise.all([
+  const [allItems, movements] = await Promise.all([
     getStockItems(),
-    getStockItemUsage(),
     getRecentMovementsByItem(3),
   ]);
 
@@ -38,7 +37,7 @@ export default async function InsumosPage({
         <div>
           <h1 className="text-xl font-bold tracking-tight text-admin-ink">Insumos</h1>
           <p className="text-sm text-admin-ink-muted">
-            Existencias físicas que productos y adicionales usan como componentes
+            Inventario propio de materiales y existencias, independiente de los productos
           </p>
         </div>
         <Link
@@ -88,8 +87,7 @@ export default async function InsumosPage({
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-3">
           {items.map((item) => {
-            const u = usage.get(item.id);
-            const level = classifyStock(item.available);
+            const level = classifyStock(item.stockQty);
             return (
               <InsumoDetailsDialog
                 key={item.id}
@@ -98,13 +96,8 @@ export default async function InsumosPage({
                   name: item.name,
                   description: item.description,
                   unit: item.unit,
-                  kind: item.kind,
                   stockQty: item.stockQty,
-                  reserved: item.reserved,
-                  available: item.available,
                   isActive: item.isActive,
-                  products: u?.products ?? [],
-                  options: u?.options ?? [],
                   movements: (movements.get(item.id) ?? []).map((m) => ({
                     id: m.id,
                     delta: m.delta,
@@ -132,13 +125,11 @@ export default async function InsumosPage({
                   </span>
                   <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 text-xs text-admin-ink-muted">
                     <span className="text-sm font-medium text-admin-ink">
-                      {item.available} disponibles
+                      {item.stockQty} en stock
                     </span>
-                    {item.origin ? (
-                      <span className="rounded-full bg-admin-surface-sunken px-2 py-0.5 text-admin-ink-secondary">
-                        {item.origin === "workshop" ? "Taller" : "Comprado"}
-                      </span>
-                    ) : null}
+                    <span className="rounded-full bg-admin-surface-sunken px-2 py-0.5 text-admin-ink-secondary">
+                      {item.origin === "workshop" ? "Taller" : "Comprado"}
+                    </span>
                     {level !== "ok" ? (
                       <span
                         className={`rounded-full px-2 py-0.5 font-semibold ${
@@ -152,7 +143,7 @@ export default async function InsumosPage({
                     ) : null}
                   </span>
                   <span className="font-admin-mono text-xs text-admin-ink-secondary">
-                    Stock {item.stockQty} · Reservado {item.reserved}
+                    {item.unit}
                   </span>
                 </span>
               </InsumoDetailsDialog>

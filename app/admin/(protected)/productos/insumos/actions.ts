@@ -8,11 +8,7 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createAuthServerClient } from "@/lib/supabase/auth-server";
 import { optionalImageFile, validateImageFile } from "@/lib/domain/imageUpload";
 import { mapCreateStockItemResult, parseCreateStockItemInput } from "@/lib/domain/stockItemCreate";
-import {
-  rpcErrorMessage,
-  validateRecipeRows,
-  type RecipeRow,
-} from "@/lib/domain/stockRecipe";
+import { rpcErrorMessage } from "@/lib/domain/stockErrors";
 
 export type FormState = { error: string | null; saved?: boolean };
 
@@ -121,7 +117,7 @@ const adjustSchema = z.object({
 });
 
 export type AdjustResult =
-  | { ok: true; stockQty: number; reserved: number; available: number; warning: string | null }
+  | { ok: true; stockQty: number }
   | { ok: false; error: string };
 
 export async function adjustStockItem(input: {
@@ -143,21 +139,12 @@ export async function adjustStockItem(input: {
   if (!res.ok) return failure(res);
 
   revalidatePath("/admin/productos", "layout");
-  return {
-    ok: true,
-    stockQty: Number(res.stock_qty),
-    reserved: Number(res.reserved),
-    available: Number(res.available),
-    warning:
-      res.warning === "STOCK_MENOR_QUE_RESERVADO"
-        ? "El stock quedó por debajo de lo reservado: hay reservas activas que no se podrán cumplir completas."
-        : null,
-  };
+  return { ok: true, stockQty: Number(res.stock_qty) };
 }
 
 export type DeleteResult =
   | { ok: true; deleted: true }
-  | { ok: true; deleted: false; archived: true; usedIn: string[]; options: string[]; message: string }
+  | { ok: true; deleted: false; archived: true; message: string }
   | { ok: false; error: string };
 
 export async function deleteStockItem(itemId: string): Promise<DeleteResult> {
@@ -169,53 +156,8 @@ export async function deleteStockItem(itemId: string): Promise<DeleteResult> {
     ok: true,
     deleted: false,
     archived: true,
-    usedIn: (res.usado_en as string[] | undefined) ?? [],
-    options: (res.opciones as string[] | undefined) ?? [],
-    // Texto propio del panel: el `mensaje` de la RPC usa otro vocabulario ("recetas").
-    message:
-      "El insumo es componente de algún producto o tiene historial: se archivó en vez de borrarse. Las variantes que lo usan quedan en 0.",
+    message: "El insumo tiene historial de movimientos: se archivó en vez de borrarse.",
   };
-}
-
-export type RecipeResult =
-  | { ok: true; availableUnits: number | null }
-  | { ok: false; error: string };
-
-const rowsSchema = z.array(
-  z.object({ stockItemId: z.string(), qtyRequired: z.number() }),
-);
-
-async function saveRecipe(
-  kind: "variant" | "option",
-  id: string,
-  rows: RecipeRow[],
-): Promise<RecipeResult> {
-  const parsedRows = rowsSchema.safeParse(rows);
-  if (!parsedRows.success) return { ok: false, error: rpcErrorMessage("COMPONENTES_INVALIDOS") };
-
-  const validation = validateRecipeRows(parsedRows.data, { allowEmpty: kind === "option" });
-  if (!validation.ok) return { ok: false, error: rpcErrorMessage(validation.error) };
-
-  const components = parsedRows.data.map((r) => ({
-    stock_item_id: r.stockItemId,
-    qty_required: r.qtyRequired,
-  }));
-  const res =
-    kind === "variant"
-      ? await callRpc("set_variant_components", { p_variant: id, p_components: components })
-      : await callRpc("set_option_components", { p_option: id, p_components: components });
-  if (!res.ok) return failure(res);
-
-  revalidatePath("/admin/productos", "layout");
-  return { ok: true, availableUnits: kind === "variant" ? Number(res.available_units) : null };
-}
-
-export async function saveVariantRecipe(variantId: string, rows: RecipeRow[]) {
-  return saveRecipe("variant", variantId, rows);
-}
-
-export async function saveOptionRecipe(optionId: string, rows: RecipeRow[]) {
-  return saveRecipe("option", optionId, rows);
 }
 
 export async function uploadStockItemImage(

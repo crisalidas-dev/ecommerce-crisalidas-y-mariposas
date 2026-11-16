@@ -6,7 +6,7 @@
  * hooks) sí está en inglés.
  *
  * La forma sale de lo que la base de datos realmente tiene (`products`,
- * `product_variants`, `product_options`, `v_variant_availability`). Lo que la DB
+ * `product_variants`, `product_options`; unidades vendibles = columna calculada `available_units`). Lo que la DB
  * no modela —ocasiones, agenda, pieza única, tiempo de preparación, descripción
  * corta/larga— no aparece aquí: se agrega cuando exista el dato, no antes.
  *
@@ -28,7 +28,7 @@ export interface VarianteProducto {
   etiqueta: string;
   /** Precio final de la variante: `base_price + price_delta`, en COP enteros. */
   precioCop: number;
-  /** Hay al menos una unidad vendible según `v_variant_availability`. */
+  /** Hay al menos una unidad vendible según `available_units`. */
   vendible: boolean;
   imagenUrl: string | null;
 }

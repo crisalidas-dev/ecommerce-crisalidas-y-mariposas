@@ -36,6 +36,8 @@ export interface StorefrontVariantRow {
   image_url: string | null;
   is_active: boolean;
   short_name: string | null;
+  /** Computed column `available_units(product_variants)`: stock minus live reservations. */
+  available_units?: Numeric;
 }
 
 export interface StorefrontOptionRow {
@@ -134,9 +136,21 @@ function collectionRank(nombre: string): number {
   return i === -1 ? COLLECTION_ORDER.length : i;
 }
 
+/** Sellable units per `variant_id` from the `available_units` embedded in each variant row. */
+export function unitsByVariantFromRows(rows: readonly StorefrontProductRow[]): Map<string, number> {
+  const units = new Map<string, number>();
+  for (const r of rows) {
+    for (const v of r.product_variants ?? []) {
+      const n = Number(v.available_units ?? 0);
+      units.set(v.id, Number.isFinite(n) ? n : 0);
+    }
+  }
+  return units;
+}
+
 /**
  * @param availability unidades vendibles por `variant_id`, de
- *   `v_variant_availability`. Una variante sin fila cuenta como 0.
+ *   `available_units` (ver `unitsByVariantFromRows`). Una variante ausente cuenta como 0.
  */
 export function mapStorefrontProducts(
   rows: StorefrontProductRow[],

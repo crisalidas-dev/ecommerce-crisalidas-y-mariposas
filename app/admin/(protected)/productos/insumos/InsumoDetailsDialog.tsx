@@ -2,23 +2,16 @@
 
 import Link from "next/link";
 import { useState, type ReactNode } from "react";
-import type { ProductUsage } from "@/lib/domain/stockUsage";
 import { Dialog } from "../../ui/Dialog";
 import { focusRingClass, secondaryButtonClass } from "../../ui/formClasses";
-import { ProductThumbnail } from "../ProductThumbnail";
 
 export interface InsumoDialogData {
   sku: string;
   name: string;
   description: string | null;
   unit: string;
-  kind: "self" | "component";
   stockQty: number;
-  reserved: number;
-  available: number;
   isActive: boolean;
-  products: ProductUsage[];
-  options: { name: string; productName: string | null; qtyRequired: number }[];
   movements: { id: string; delta: number; stockAfter: number; reason: string; createdAt: string }[];
 }
 
@@ -84,64 +77,11 @@ export function InsumoDetailsDialog({
           <h3 className={SECTION_TITLE}>Datos</h3>
           <dl className="grid grid-cols-2 gap-x-4 gap-y-2 text-sm sm:grid-cols-3">
             <Field label="Unidad" value={data.unit} />
-            <Field label="Tipo" value={data.kind === "self" ? "Espejo de variante" : "Insumo"} />
             <Field label="Stock" value={String(data.stockQty)} mono />
-            <Field label="Reservado" value={String(data.reserved)} mono />
-            <Field label="Disponible" value={String(data.available)} mono />
           </dl>
           <dl>
             <Field label="Descripción" value={data.description?.trim() || "—"} />
           </dl>
-        </section>
-
-        <section className="flex flex-col gap-2" aria-label="Usado en">
-          <h3 className={SECTION_TITLE}>Usado en</h3>
-          {data.products.length + data.options.length === 0 ? (
-            <p className="text-sm text-admin-ink-muted">Ningún producto lo usa como componente todavía.</p>
-          ) : (
-            <ul className="flex flex-col divide-y divide-admin-border border-y border-admin-border text-sm">
-              {data.products.map((p) => (
-                <li
-                  key={p.productSku}
-                  className="grid grid-cols-[4rem_minmax(0,1fr)_auto] items-center gap-x-3 py-2"
-                >
-                  <span className="relative block h-16 w-16 overflow-hidden rounded-lg bg-admin-surface-sunken">
-                    <ProductThumbnail url={p.imageUrl} alt={p.productName} />
-                  </span>
-                  <span className="flex min-w-0 flex-col">
-                    <span className="font-medium text-admin-ink">{p.productName}</span>
-                    {p.showVariants ? (
-                      <span className="text-xs text-admin-ink-secondary">
-                        {p.variants
-                          .map(
-                            (v) =>
-                              `${v.label || "Única"}${p.uniformQty === null ? ` × ${v.qtyRequired}` : ""}`,
-                          )
-                          .join(", ")}
-                      </span>
-                    ) : null}
-                  </span>
-                  <span className="text-right font-admin-mono text-admin-ink-secondary">
-                    {p.uniformQty !== null ? (
-                      <>
-                        <span className="sr-only">Cantidad por unidad: </span>× {p.uniformQty}
-                      </>
-                    ) : (
-                      "según variante"
-                    )}
-                  </span>
-                </li>
-              ))}
-              {data.options.map((o, i) => (
-                <li key={`o-${i}`} className="flex items-center justify-between gap-3 py-2">
-                  <span className="text-admin-ink-secondary">
-                    Adicional «{o.name}»{o.productName ? ` de ${o.productName}` : ""}
-                  </span>
-                  <span className="font-admin-mono text-admin-ink-secondary">× {o.qtyRequired}</span>
-                </li>
-              ))}
-            </ul>
-          )}
         </section>
 
         <section className="flex flex-col gap-2" aria-label="Movimientos recientes">

@@ -14,8 +14,6 @@ interface Props {
     id: string;
     sku: string;
     stockQty: number;
-    reserved: number;
-    available: number;
     isActive: boolean;
     unit: string;
   };
@@ -39,11 +37,7 @@ export function StockItemControls({ item }: Props) {
           setMessage({ tone: "error", text: res.error });
           return;
         }
-        setMessage(
-          res.warning
-            ? { tone: "warn", text: `Ajuste aplicado. ${res.warning}` }
-            : { tone: "ok", text: `Ajuste aplicado. Stock: ${res.stockQty}.` },
-        );
+        setMessage({ tone: "ok", text: `Ajuste aplicado. Stock: ${res.stockQty}.` });
         setReason("");
         router.refresh();
       } catch {
@@ -74,11 +68,7 @@ export function StockItemControls({ item }: Props) {
         } else if (res.deleted) {
           router.push("/admin/productos/insumos");
         } else {
-          const where = [...res.usedIn, ...res.options.map((o) => `adicional «${o}»`)];
-          setMessage({
-            tone: "warn",
-            text: `${res.message} Archivado. En uso por: ${where.join(", ") || "—"}.`,
-          });
+          setMessage({ tone: "warn", text: res.message });
           router.refresh();
         }
       } catch {
@@ -97,14 +87,14 @@ export function StockItemControls({ item }: Props) {
     },
     deactivate: {
       title: "¿Desactivar este insumo?",
-      description: "Dejará de poder agregarse como componente. Puedes activarlo de nuevo cuando quieras.",
+      description: "Quedará marcado como inactivo. Puedes activarlo de nuevo cuando quieras.",
       confirmLabel: "Desactivar",
       tone: "default" as const,
       run: () => applyActive(false),
     },
     delete: {
       title: "¿Eliminar este insumo?",
-      description: "Si está en uso, se archivará en su lugar.",
+      description: "Si tiene historial de movimientos, se archivará en su lugar.",
       confirmLabel: "Eliminar insumo",
       tone: "danger" as const,
       run: applyDelete,
@@ -114,17 +104,9 @@ export function StockItemControls({ item }: Props) {
 
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-transparent bg-admin-surface-raised p-4 shadow-admin-card">
-      <dl className="grid grid-cols-3 gap-4 text-center">
-        {[
-          ["Stock", item.stockQty],
-          ["Reservado", item.reserved],
-          ["Disponible", item.available],
-        ].map(([label, value]) => (
-          <div key={label}>
-            <dt className="text-xs text-admin-ink-muted">{label}</dt>
-            <dd className="font-admin-mono text-2xl font-semibold text-admin-ink">{value}</dd>
-          </div>
-        ))}
+      <dl className="text-center">
+        <dt className="text-xs text-admin-ink-muted">Stock</dt>
+        <dd className="font-admin-mono text-2xl font-semibold text-admin-ink">{item.stockQty}</dd>
       </dl>
 
       <form

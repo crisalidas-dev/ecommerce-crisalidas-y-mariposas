@@ -22,17 +22,18 @@ interface ProductRow {
     attributes: Record<string, string> | null;
     price_delta: number | string;
     is_active: boolean;
+    available_units: number | string | null;
   }[];
 }
 
 export async function getSaleCatalog(): Promise<CatalogProduct[]> {
   const supabase = createAdminClient();
 
-  const [productsRes, optionsRes, availRes] = await Promise.all([
+  const [productsRes, optionsRes] = await Promise.all([
     supabase
       .from("products")
       .select(
-        "id, name, base_price, product_variants(id, sku, attributes, price_delta, is_active)",
+        "id, name, base_price, product_variants(id, sku, attributes, price_delta, is_active, available_units)",
       )
       .eq("is_published", true)
       .order("name"),
@@ -41,16 +42,10 @@ export async function getSaleCatalog(): Promise<CatalogProduct[]> {
       .select("product_id, name, price, max_qty")
       .eq("is_active", true)
       .order("name"),
-    supabase.from("v_variant_availability").select("variant_id, available_units"),
   ]);
 
   if (productsRes.error) throw productsRes.error;
-  if (availRes.error) throw availRes.error;
   if (optionsRes.error) throw optionsRes.error;
-
-  const unitsByVariant = new Map(
-    (availRes.data ?? []).map((a) => [a.variant_id as string, Number(a.available_units)]),
-  );
 
   const optionsByProduct = new Map<string, CatalogOption[]>();
   for (const row of optionsRes.data ?? []) {
@@ -69,7 +64,7 @@ export async function getSaleCatalog(): Promise<CatalogProduct[]> {
           sku: v.sku,
           label: variantLabel(v.attributes),
           price: Number(p.base_price) + Number(v.price_delta),
-          available: unitsByVariant.get(v.id) ?? 0,
+          available: Number(v.available_units ?? 0),
         })),
       options: optionsByProduct.get(p.id) ?? [],
     }))

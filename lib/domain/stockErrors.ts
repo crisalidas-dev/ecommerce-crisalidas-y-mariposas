@@ -1,80 +1,7 @@
 /**
- * Lógica pura de recetas de insumos (plan "productos compuestos por insumos").
- * La disponibilidad oficial la calcula la vista `v_variant_availability`;
- * `computeRecipeAvailability` replica esa regla solo para la vista previa del
- * editor antes de guardar.
+ * Spanish messages for the error codes returned by the stock/catalog RPCs and
+ * for direct PostgREST writes in the panel. Pure: no Supabase, no React.
  */
-
-export interface RecipeRow {
-  stockItemId: string;
-  qtyRequired: number;
-}
-
-export interface ItemAvailability {
-  available: number;
-  isActive: boolean;
-}
-
-export interface RecipeAvailability {
-  availableUnits: number;
-  bottleneckItemId: string | null;
-}
-
-export function computeRecipeAvailability(
-  rows: RecipeRow[],
-  items: Record<string, ItemAvailability>,
-): RecipeAvailability {
-  if (rows.length === 0) return { availableUnits: 0, bottleneckItemId: null };
-
-  let best: RecipeAvailability | null = null;
-  for (const row of rows) {
-    const item = items[row.stockItemId];
-    const units =
-      !item || !item.isActive || row.qtyRequired <= 0
-        ? 0
-        : Math.floor(Math.max(item.available, 0) / row.qtyRequired);
-    if (best === null || units < best.availableUnits) {
-      best = { availableUnits: units, bottleneckItemId: row.stockItemId };
-    }
-  }
-  return best ?? { availableUnits: 0, bottleneckItemId: null };
-}
-
-/**
- * Stock items that can be added to a recipe: active components not already in
- * it. Self mirror items are never offered (they are not insumos).
- */
-export function recipeCandidates<T extends { id: string; kind: "self" | "component"; isActive: boolean }>(
-  stockItems: T[],
-  usedIds: Iterable<string>,
-): T[] {
-  const used = new Set(usedIds);
-  return stockItems.filter((i) => i.kind === "component" && i.isActive && !used.has(i.id));
-}
-
-export type RecipeValidation =
-  | { ok: true }
-  | { ok: false; error: "RECETA_VACIA" | "COMPONENTES_INVALIDOS" };
-
-export function validateRecipeRows(
-  rows: RecipeRow[],
-  options: { allowEmpty?: boolean } = {},
-): RecipeValidation {
-  if (rows.length === 0) {
-    return options.allowEmpty ? { ok: true } : { ok: false, error: "RECETA_VACIA" };
-  }
-  const seen = new Set<string>();
-  for (const row of rows) {
-    if (!row.stockItemId || seen.has(row.stockItemId)) {
-      return { ok: false, error: "COMPONENTES_INVALIDOS" };
-    }
-    seen.add(row.stockItemId);
-    if (!Number.isInteger(row.qtyRequired) || row.qtyRequired <= 0) {
-      return { ok: false, error: "COMPONENTES_INVALIDOS" };
-    }
-  }
-  return { ok: true };
-}
 
 const RPC_MESSAGES: Record<string, string> = {
   MODO_INVALIDO: "Modo de ajuste inválido.",
@@ -83,10 +10,6 @@ const RPC_MESSAGES: Record<string, string> = {
   INSUMO_NO_EXISTE: "El insumo ya no existe.",
   STOCK_NEGATIVO: "El ajuste dejaría el stock negativo.",
   VARIANTE_NO_EXISTE: "La variante ya no existe.",
-  OPCION_NO_EXISTE: "El adicional ya no existe.",
-  COMPONENTES_INVALIDOS:
-    "Hay componentes inválidos: cada insumo debe aparecer una vez con una cantidad entera mayor que cero.",
-  RECETA_VACIA: "Una variante necesita al menos un componente.",
   SKU_INVALIDO: "El SKU no es válido.",
   STOCK_INVALIDO: "El stock inicial debe ser un entero mayor o igual a cero.",
   PRODUCTO_NO_EXISTE: "El producto ya no existe.",
@@ -115,8 +38,6 @@ const RPC_MESSAGES: Record<string, string> = {
   SIMBOLISMO_REQUERIDO: "El simbolismo es obligatorio en los productos de Crisálidas.",
   PRODUCTO_CON_HISTORIAL:
     "El producto tiene pedidos o reservas: no se puede eliminar. Puedes despublicarlo para que deje de verse en la tienda.",
-  INSUMO_EN_USO:
-    "El insumo propio de una variante se usa en otra receta (de otro producto o de un adicional) o en una reserva: no se puede eliminar.",
   VARIANTE_CON_HISTORIAL:
     "La variante tiene pedidos o reservas: no se puede eliminar. Puedes desactivarla para que deje de ofrecerse.",
   ULTIMA_VARIANTE: "Es la única variante del producto: elimina el producto en su lugar.",

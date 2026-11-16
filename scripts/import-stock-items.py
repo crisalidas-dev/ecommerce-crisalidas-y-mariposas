@@ -234,7 +234,7 @@ def apply(items, base_url, key):
         e["image_url"] = f"{base_url}/storage/v1/object/public/{path}"
 
     rows = [
-        {"sku": e["sku"], "name": e["name"], "kind": "component", "unit": "unidad",
+        {"sku": e["sku"], "name": e["name"], "unit": "unidad",
          "origin": e["origin"], "image_url": e["image_url"]}
         for e in items
     ]

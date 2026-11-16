@@ -4,12 +4,13 @@ import { revalidatePath, updateTag } from "next/cache";
 import { redirect } from "next/navigation";
 import { z } from "zod";
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import { postgrestErrorMessage, rpcErrorMessage } from "@/lib/domain/stockRecipe";
+import { postgrestErrorMessage, rpcErrorMessage } from "@/lib/domain/stockErrors";
 import { clearImage, removeStoredImages, storeImage } from "@/lib/admin/imageStorage";
 import { requireProductEditor } from "@/lib/admin/productGuard";
 import { COP_AMOUNT_MAX } from "@/lib/domain/copAmount";
 import { priceCeilingWarning } from "@/lib/domain/priceCeiling";
 import { parseChrysalisCount } from "@/lib/domain/chrysalis";
+import { parseVariantStock } from "@/lib/domain/variantStock";
 import { combineWarnings } from "@/lib/domain/actionWarnings";
 import { optionalImageFile, validateImageFile } from "@/lib/domain/imageUpload";
 import { parseNewLineInput, type ProductLine } from "@/lib/domain/productLine";
@@ -38,6 +39,8 @@ const createProductSchema = z.object({
   attributeValue: z.string().trim().optional(),
   // Solo Crisálidas; se valida con parseChrysalisCount.
   chrysalisCount: z.string().optional(),
+  // Initial stock of the first variant; empty = 0 (parseVariantStock).
+  stockQty: z.string().optional(),
 });
 
 type RpcResult = { ok?: boolean; error?: string; mensaje?: string } | null;
@@ -81,6 +84,8 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
   const sheet = productSheetValues(input);
   const chrysalis = parseChrysalisCount(input.brand, input.chrysalisCount);
   if (!chrysalis.ok) return { error: chrysalis.error };
+  const stock = parseVariantStock(input.stockQty);
+  if (!stock.ok) return { error: stock.error };
 
   // La foto es opcional; se valida antes de crear nada para no dejar un producto a medias.
   const photo = optionalImageFile(formData.get("photo"));
@@ -99,8 +104,7 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
     p_description: input.description || null,
     p_category: input.category || null,
     p_attributes: attributes,
-    // Sin p_stock_qty (la RPC usa 0): la disponibilidad sale de los componentes
-    // de la variante (v_variant_availability), que se asignan en el editor.
+    p_stock_qty: stock.value,
     p_simbolismo: sheet.simbolismo,
     p_short_name: sheet.shortName,
   });
@@ -137,12 +141,15 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
 
 export async function setProductPublished(productId: string, published: boolean) {
   const supabase = createAdminClient();
-  const { error } = await supabase
+  const { data, error } = await supabase
     .from("products")
     .update({ is_published: published })
-    .eq("id", productId);
+    .eq("id", productId)
+    .select("sku")
+    .maybeSingle();
   if (error) throw error;
-  revalidatePath("/admin/productos");
+  // Publishing changes what the storefront shows: expire its catalog cache too.
+  revalidateProduct((data?.sku as string | undefined) ?? null);
 }
 
 /**
@@ -281,7 +288,7 @@ export async function updateProductName(productId: string, name: string, shortNa
 
 /**
  * Elimina un producto sin historial de pedidos (delete_product, 050). La base
- * decide y se niega con PRODUCTO_CON_HISTORIAL o INSUMO_EN_USO; aquí solo se
+ * decide y se niega con PRODUCTO_CON_HISTORIAL; aquí solo se
  * borran después las fotos que devuelve. Un fallo de storage no deshace nada.
  */
 export async function deleteProduct(productId: string): Promise<FormState> {
@@ -303,7 +310,7 @@ export async function deleteProduct(productId: string): Promise<FormState> {
 
 /**
  * Elimina una variante sin historial (delete_variant, 051). La base se niega
- * con VARIANTE_CON_HISTORIAL, ULTIMA_VARIANTE o INSUMO_EN_USO; aquí solo se
+ * con VARIANTE_CON_HISTORIAL o ULTIMA_VARIANTE; aquí solo se
  * borran después las fotos que devuelve (un fallo de storage solo se registra).
  */
 export async function deleteVariant(
@@ -392,6 +399,8 @@ const createVariantSchema = z.object({
   unnamedAttributeValue: z.string().trim().optional(),
   // Solo Crisálidas; la marca se lee de la base.
   chrysalisCount: z.string().optional(),
+  // Initial stock; empty = 0 (parseVariantStock).
+  stockQty: z.string().optional(),
 });
 
 const CHRYSALIS_NOT_SAVED = "No se guardó el número de crisálidas; edítalo en la variante.";
@@ -451,11 +460,13 @@ export async function createVariant(
   if (!product) return { ok: false, error: rpcErrorMessage("PRODUCTO_NO_EXISTE") };
   const chrysalis = parseChrysalisCount(product.brand as string, input.chrysalisCount);
   if (!chrysalis.ok) return { ok: false, error: chrysalis.error };
+  const stock = parseVariantStock(input.stockQty);
+  if (!stock.ok) return { ok: false, error: stock.error };
 
   const { data, error } = await supabase.rpc("create_variant_with_stock", {
     p_product: input.productId,
     p_attributes: attributes,
-    // Sin p_stock_qty (la RPC usa 0): la disponibilidad sale de los componentes.
+    p_stock_qty: stock.value,
     p_unnamed_variant_attributes: unnamed,
   });
   const result = data as (RpcResult & { sku?: string; variant_id?: string }) | null;
@@ -484,6 +495,28 @@ export async function createVariant(
  * producto de la variante en la base; otras marcas no llevan crisálidas.
  * Producción lo lee en vivo (/admin/produccion).
  */
+export async function updateVariantStock(variantId: string, stockQty: number): Promise<FormState> {
+  if (!z.string().uuid().safeParse(variantId).success) return { error: "Variante inválida." };
+
+  const parsed = parseVariantStock(stockQty);
+  if (!parsed.ok) return { error: parsed.error };
+
+  // There is no RPC for variant stock: the admin client writes the base stock directly.
+  const supabase = createAdminClient();
+  const { data, error } = await supabase
+    .from("product_variants")
+    .update({ stock_qty: parsed.value })
+    .eq("id", variantId)
+    .select("id, products(sku)")
+    .maybeSingle();
+  if (error) return { error: postgrestErrorMessage(error) };
+  if (!data) return { error: rpcErrorMessage("VARIANTE_NO_EXISTE") };
+
+  const product = (data.products ?? null) as unknown as { sku: string } | null;
+  revalidateProduct(product?.sku ?? null);
+  return { error: null };
+}
+
 export async function updateVariantChrysalisCount(variantId: string, count: number | null): Promise<FormState> {
   const guard = await requireProductEditor();
   if (!guard.ok) return { error: guard.error };
