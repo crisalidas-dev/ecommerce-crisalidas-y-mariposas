@@ -1,6 +1,6 @@
 import "server-only";
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import { createAuthServerClient } from "@/lib/supabase/auth-server";
+import { requireAdminSession } from "./requireAdminSession";
 import {
   IMAGE_BUCKET,
   imageObjectPath,
@@ -23,16 +23,6 @@ export type UploadImageResult =
 export type RemoveImageResult = { ok: true; sku: string } | { ok: false; error: string };
 
 const NOT_FOUND = "No se encontró el registro.";
-const UNAUTHORIZED = "Tu sesión expiró. Vuelve a iniciar sesión.";
-
-/** Las acciones usan `service_role`, así que la sesión se verifica aquí además de en `proxy.ts`. */
-async function hasSession(): Promise<boolean> {
-  const supabase = await createAuthServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user !== null;
-}
 
 async function loadRow(target: ImageTarget) {
   const supabase = createAdminClient();
@@ -47,7 +37,8 @@ async function loadRow(target: ImageTarget) {
 
 /** El SKU y la ruta salen de la fila en la base, nunca del cliente. */
 export async function storeImage(target: ImageTarget, file: unknown): Promise<UploadImageResult> {
-  if (!(await hasSession())) return { ok: false, error: UNAUTHORIZED };
+  const session = await requireAdminSession();
+  if (!session.ok) return { ok: false, error: session.error };
   if (!(file instanceof File)) return { ok: false, error: "Selecciona una imagen." };
 
   const validation = validateImageFile(file);
@@ -95,7 +86,8 @@ export async function storeImage(target: ImageTarget, file: unknown): Promise<Up
 }
 
 export async function clearImage(target: ImageTarget): Promise<RemoveImageResult> {
-  if (!(await hasSession())) return { ok: false, error: UNAUTHORIZED };
+  const session = await requireAdminSession();
+  if (!session.ok) return { ok: false, error: session.error };
 
   const row = await loadRow(target);
   if (!row) return { ok: false, error: NOT_FOUND };

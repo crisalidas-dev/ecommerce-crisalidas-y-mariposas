@@ -5,7 +5,12 @@ export const metadata: Metadata = {
   title: "Entrar — Panel Nacer Group",
 };
 
-export default function LoginPage() {
+export default async function LoginPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ expirada?: string }>;
+}) {
+  const { expirada } = await searchParams;
   return (
     <main className="flex min-h-dvh items-center justify-center bg-admin-surface px-6">
       <div className="w-full max-w-sm rounded-xl border border-transparent bg-admin-surface-raised p-8 shadow-admin-card">
@@ -30,6 +35,14 @@ export default function LoginPage() {
         </svg>
         <h1 className="mb-1 text-lg font-bold tracking-tight text-admin-ink">Panel de administración</h1>
         <p className="mb-6 text-sm text-admin-ink-muted">Nacer Group</p>
+        {expirada === "1" && (
+          <p
+            role="status"
+            className="mb-4 rounded-lg border border-admin-border bg-admin-surface px-3 py-2 text-sm text-admin-ink-secondary"
+          >
+            Tu sesión expiró por inactividad. Vuelve a iniciar sesión.
+          </p>
+        )}
         <LoginForm />
       </div>
     </main>

@@ -1,7 +1,10 @@
 import type { ReactNode } from "react";
-import { createAuthServerClient } from "@/lib/supabase/auth-server";
+import { redirect } from "next/navigation";
+import { getAdminSession } from "@/lib/admin/requireAdminSession";
+import { IDLE_TIMEOUT_MS } from "@/lib/admin/sessionPolicy";
 import { signOut } from "../actions";
 import { AccountMenu } from "./AccountMenu";
+import { IdleSessionGuard } from "./IdleSessionGuard";
 import { NavLink } from "./NavLink";
 import { ThemeToggle } from "./ThemeToggle";
 import { secondaryButtonClass } from "./ui/formClasses";
@@ -15,18 +18,17 @@ function initials(email: string): string {
 
 /**
  * Shell autenticado (nav + tema + salir). No es root layout — cuelga de
- * `app/admin/layout.tsx`. `proxy.ts` ya garantiza que si se llegó hasta acá
- * hay sesión; este layout no vuelve a verificarla.
+ * `app/admin/layout.tsx`. `proxy.ts` no es la única barrera (defensa en
+ * profundidad, ver guía de autenticación de Next): se verifica otra vez aquí.
  */
 export default async function ProtectedLayout({ children }: { children: ReactNode }) {
-  const supabase = await createAuthServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  const email = user?.email ?? "";
+  const session = await getAdminSession();
+  if (!session.ok) redirect("/admin/login");
+  const { email } = session;
 
   return (
     <div className="flex min-h-screen flex-col bg-admin-surface text-admin-ink">
+      <IdleSessionGuard idleMs={IDLE_TIMEOUT_MS} />
       <a
         href="#contenido"
         className="sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-30 focus:rounded-lg focus:bg-admin-accent focus:px-4 focus:py-3 focus:text-sm focus:font-medium focus:text-admin-accent-ink focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-admin-accent"

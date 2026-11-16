@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireAdminSession } from "@/lib/admin/requireAdminSession";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { canMarkLost, validateLostReason } from "@/lib/domain/dispatch";
 import { canResolveLost, validateResolution } from "@/lib/domain/lostFollowUp";
@@ -22,6 +23,8 @@ function revalidateFulfillmentViews() {
  * saltan pasos.
  */
 export async function advanceFulfillment(orderId: string) {
+  const session = await requireAdminSession();
+  if (!session.ok) return { ok: false as const, error: "SESION_EXPIRADA" as const };
   const supabase = createAdminClient();
 
   const { data: order, error: fetchError } = await supabase
@@ -65,6 +68,8 @@ export async function advanceFulfillment(orderId: string) {
  * Requiere `orders.lost_reason` (add_lost_reason_to_orders) y `orders.lost_at` (add_lost_follow_up_to_orders).
  */
 export async function markOrderLost(orderId: string, reason: string) {
+  const session = await requireAdminSession();
+  if (!session.ok) return { ok: false as const, error: "SESION_EXPIRADA" as const };
   const checked = validateLostReason(reason);
   if (!checked.ok) return { ok: false as const, error: "MOTIVO_INVALIDO" as const };
 
@@ -111,6 +116,8 @@ export async function markOrderLost(orderId: string, reason: string) {
  * concurrente no escriben nada. Requiere la migración add_lost_follow_up_to_orders.
  */
 export async function resolveLostOrder(orderId: string, resolution: string, note: string | null) {
+  const session = await requireAdminSession();
+  if (!session.ok) return { ok: false as const, error: "SESION_EXPIRADA" as const };
   const checked = validateResolution(resolution, note);
   if (!checked.ok) return { ok: false as const, error: checked.error };
 

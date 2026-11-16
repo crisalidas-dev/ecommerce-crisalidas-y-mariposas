@@ -17,6 +17,8 @@ export interface RateLimitResult {
 export interface RateLimiter {
   /** Counts one attempt for `key` and says whether it may proceed. */
   check(key: string): RateLimitResult;
+  /** Forgets every hit of `key` (e.g. after a successful login). */
+  reset(key: string): void;
 }
 
 export interface SlidingWindowOptions {
@@ -47,6 +49,7 @@ export function createSlidingWindowLimiter(
 
   return {
     size: () => hits.size,
+    reset: (key) => void hits.delete(key),
     check(key) {
       const t = now();
       const times = (hits.get(key) ?? []).filter((h) => t - h < windowMs);

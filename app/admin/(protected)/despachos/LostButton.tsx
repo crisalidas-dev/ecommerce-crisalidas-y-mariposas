@@ -12,6 +12,7 @@ const ERROR_MESSAGES: Record<string, string> = {
   PEDIDO_CAMBIO:
     "El pedido cambió mientras tanto y ya no está en despacho. Actualiza la página para ver su estado actual.",
   PEDIDO_NO_EXISTE: "El pedido ya no existe.",
+  SESION_EXPIRADA: "Tu sesión expiró. Vuelve a iniciar sesión.",
 };
 const GENERIC_ERROR = "No se pudo marcar el pedido como perdido. Inténtalo de nuevo.";
 

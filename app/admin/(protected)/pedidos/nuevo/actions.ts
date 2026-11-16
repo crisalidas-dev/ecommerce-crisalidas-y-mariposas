@@ -2,6 +2,7 @@
 
 import { revalidatePath } from "next/cache";
 import { redirect } from "next/navigation";
+import { requireAdminSession } from "@/lib/admin/requireAdminSession";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 import { createAuthServerClient } from "@/lib/supabase/auth-server";
 import {
@@ -25,6 +26,11 @@ export async function createPanelSale(
   input: unknown,
   skuNames: Record<string, string>,
 ): Promise<PanelSaleState> {
+  const session = await requireAdminSession();
+  if (!session.ok) {
+    return { error: { paso: "datos", message: session.error, fields: [] }, fieldErrors: {} };
+  }
+
   const authClient = await createAuthServerClient();
   const {
     data: { user },

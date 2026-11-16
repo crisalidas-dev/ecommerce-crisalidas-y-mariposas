@@ -14,6 +14,7 @@ const ADVANCE_ERRORS: Record<string, ActionMessage> = {
     refresh: true,
   },
   PEDIDO_NO_EXISTE: { text: "El pedido ya no existe.", refresh: true },
+  SESION_EXPIRADA: { text: "Tu sesión expiró. Vuelve a iniciar sesión.", refresh: false },
 };
 
 export const ADVANCE_GENERIC_ERROR: ActionMessage = {

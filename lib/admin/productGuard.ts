@@ -1,5 +1,5 @@
 import "server-only";
-import { createAuthServerClient } from "@/lib/supabase/auth-server";
+import { requireAdminSession } from "./requireAdminSession";
 
 /**
  * Single access point for the product editor writes (ficha, precio, nombre,
@@ -13,10 +13,7 @@ import { createAuthServerClient } from "@/lib/supabase/auth-server";
 export async function requireProductEditor(): Promise<
   { ok: true; actor: string } | { ok: false; error: string }
 > {
-  const supabase = await createAuthServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  if (!user) return { ok: false, error: "Tu sesión expiró. Vuelve a iniciar sesión." };
-  return { ok: true, actor: user.email ?? "panel" };
+  const session = await requireAdminSession();
+  if (!session.ok) return { ok: false, error: session.error };
+  return { ok: true, actor: session.actor };
 }

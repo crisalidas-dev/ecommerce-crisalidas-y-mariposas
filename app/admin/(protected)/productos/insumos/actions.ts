@@ -5,7 +5,7 @@ import { redirect } from "next/navigation";
 import { z } from "zod";
 import { clearImage, storeImage } from "@/lib/admin/imageStorage";
 import { createAdminClient } from "@/lib/supabase/admin-client";
-import { createAuthServerClient } from "@/lib/supabase/auth-server";
+import { requireProductEditor } from "@/lib/admin/productGuard";
 import { optionalImageFile, validateImageFile } from "@/lib/domain/imageUpload";
 import { mapCreateStockItemResult, parseCreateStockItemInput } from "@/lib/domain/stockItemCreate";
 import { rpcErrorMessage } from "@/lib/domain/stockErrors";
@@ -25,14 +25,6 @@ function failure(res: RpcResult): { ok: false; error: string } {
   return { ok: false, error: rpcErrorMessage(res.error, res.mensaje) };
 }
 
-async function currentActor(): Promise<string> {
-  const supabase = await createAuthServerClient();
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-  return user?.email ?? "panel";
-}
-
 const updateFieldsSchema = z.object({
   name: z.string().trim().min(1, "El nombre es obligatorio."),
   description: z.string().trim().optional(),
@@ -40,6 +32,8 @@ const updateFieldsSchema = z.object({
 });
 
 export async function createStockItem(_prev: FormState, formData: FormData): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
   const parsed = parseCreateStockItemInput(Object.fromEntries(formData));
   if (!parsed.ok) return { error: parsed.error };
   const input = parsed.data;
@@ -78,6 +72,8 @@ export async function updateStockItem(
   _prev: FormState,
   formData: FormData,
 ): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
   const parsed = updateFieldsSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
   const input = parsed.data;
@@ -99,6 +95,8 @@ export async function updateStockItem(
 }
 
 export async function setStockItemActive(itemId: string, sku: string, active: boolean) {
+  const guard = await requireProductEditor();
+  if (!guard.ok) throw new Error(guard.error);
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("stock_items")
@@ -126,6 +124,8 @@ export async function adjustStockItem(input: {
   qty: number;
   reason: string;
 }): Promise<AdjustResult> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { ok: false, error: guard.error };
   const parsed = adjustSchema.safeParse(input);
   if (!parsed.success) return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
 
@@ -134,7 +134,7 @@ export async function adjustStockItem(input: {
     p_mode: parsed.data.mode,
     p_qty: parsed.data.qty,
     p_reason: parsed.data.reason,
-    p_actor: await currentActor(),
+    p_actor: guard.actor,
   });
   if (!res.ok) return failure(res);
 
@@ -148,6 +148,8 @@ export type DeleteResult =
   | { ok: false; error: string };
 
 export async function deleteStockItem(itemId: string): Promise<DeleteResult> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { ok: false, error: guard.error };
   const res = await callRpc("delete_stock_item", { p_item: itemId });
   if (!res.ok) return failure(res);
   revalidatePath("/admin/productos", "layout");

@@ -1,6 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
+import { requireAdminSession } from "@/lib/admin/requireAdminSession";
 import { createAdminClient } from "@/lib/supabase/admin-client";
 
 /**
@@ -10,6 +11,9 @@ import { createAdminClient } from "@/lib/supabase/admin-client";
  * no del panel administrativo completo.
  */
 async function setOrderName(column: "supplier_name" | "artisan_name", orderId: string, name: string) {
+  const session = await requireAdminSession();
+  if (!session.ok) throw new Error(session.error);
+
   const supabase = createAdminClient();
 
   const { error } = await supabase

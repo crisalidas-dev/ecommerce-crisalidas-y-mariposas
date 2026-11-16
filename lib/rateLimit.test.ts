@@ -95,3 +95,15 @@ describe("clientIpFromHeaders", () => {
     assert.equal(clientIpFromHeaders(h({ "x-forwarded-for": " , " })), "unknown");
   });
 });
+
+describe("limiter reset", () => {
+  it("clears the budget of one key only", () => {
+    const limiter = createSlidingWindowLimiter({ limit: 1, windowMs: 1000, now: clock().now });
+    limiter.check("a");
+    limiter.check("b");
+    assert.equal(limiter.check("a").allowed, false);
+    limiter.reset("a");
+    assert.equal(limiter.check("a").allowed, true);
+    assert.equal(limiter.check("b").allowed, false);
+  });
+});

@@ -5,6 +5,10 @@ import { NextResponse, type NextRequest } from "next/server";
  * Verifica/refresca la sesión de Supabase Auth dentro del middleware. Usa la
  * llave `anon`, nunca `service_role` — el middleware solo confirma
  * identidad, no toca `orders` ni `products`.
+ *
+ * Devuelve el cliente para que `proxy.ts` pueda cerrar la sesión cuando la
+ * política de expiración de la app la invalida, y un getter de la respuesta
+ * porque `setAll` la reemplaza cuando Supabase refresca los tokens.
  */
 export async function updateSession(request: NextRequest) {
   let response = NextResponse.next({ request });
@@ -35,5 +39,9 @@ export async function updateSession(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  return { response, user };
+  return {
+    supabase,
+    user,
+    getResponse: () => response,
+  };
 }

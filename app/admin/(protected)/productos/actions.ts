@@ -50,6 +50,8 @@ export async function createProductLine(input: {
   name: string;
   code: string;
 }): Promise<{ ok: true; line: ProductLine } | { ok: false; error: string }> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { ok: false, error: guard.error };
   const parsed = parseNewLineInput(input);
   if (!parsed.ok) return parsed;
 
@@ -66,6 +68,8 @@ export async function createProductLine(input: {
 }
 
 export async function createProduct(_prev: FormState, formData: FormData): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
   const parsed = createProductSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
@@ -140,6 +144,8 @@ export async function createProduct(_prev: FormState, formData: FormData): Promi
 }
 
 export async function setProductPublished(productId: string, published: boolean) {
+  const guard = await requireProductEditor();
+  if (!guard.ok) throw new Error(guard.error);
   const supabase = createAdminClient();
   const { data, error } = await supabase
     .from("products")
@@ -379,6 +385,8 @@ export async function setVariantActive(
   variantId: string,
   active: boolean,
 ): Promise<{ ok: true } | { ok: false; error: string }> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { ok: false, error: guard.error };
   const supabase = createAdminClient();
   const { error } = await supabase
     .from("product_variants")
@@ -422,6 +430,8 @@ async function saveChrysalisCount(variantId: string, count: number | null): Prom
 export async function createVariant(
   formData: FormData,
 ): Promise<{ ok: true; sku: string; warning: string | null } | { ok: false; error: string }> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { ok: false, error: guard.error };
   const parsed = createVariantSchema.safeParse(Object.fromEntries(formData));
   if (!parsed.success) {
     return { ok: false, error: parsed.error.issues[0]?.message ?? "Datos inválidos." };
@@ -496,6 +506,8 @@ export async function createVariant(
  * Producción lo lee en vivo (/admin/produccion).
  */
 export async function updateVariantStock(variantId: string, stockQty: number): Promise<FormState> {
+  const guard = await requireProductEditor();
+  if (!guard.ok) return { error: guard.error };
   if (!z.string().uuid().safeParse(variantId).success) return { error: "Variante inválida." };
 
   const parsed = parseVariantStock(stockQty);
