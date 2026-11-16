@@ -1,6 +1,6 @@
 # Nacer Group — Ecommerce + Agente IA
 
-Documento maestro de contexto: `README.md`. Este archivo contiene solo lo que no se
+Documento maestro de contexto del negocio: `docs/contexto-negocio.md`. README técnico: `README.md`. Este archivo contiene solo lo que no se
 puede violar nunca.
 
 ## Marcas — estado en el sitio
