@@ -46,3 +46,6 @@ next-env.d.ts
 
 # WhatsApp assistant repo (separate git repository, reference copy only)
 /asistente-nacer-group/
+
+# agents skills
+/.agents/skills/*
