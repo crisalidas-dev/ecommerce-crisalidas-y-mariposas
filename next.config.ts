@@ -1,6 +1,10 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // Dev only: lets a Cloudflare quick tunnel (HTTPS, needed by Mercado Pago's
+  // back_urls / notification_url) load dev assets. `*` matches one label, so it
+  // covers every new random tunnel hostname.
+  allowedDevOrigins: ["*.trycloudflare.com"],
   experimental: {
     // Dos root layouts (storefront y admin): la 404 de URLs sin ruta vive en
     // `app/global-not-found.tsx`.
