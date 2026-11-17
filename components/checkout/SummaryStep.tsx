@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import { describeOrderLines, type NamedCartLine } from "@/lib/domain/checkout/orderLines";
 import type { DeliveryStep } from "@/lib/domain/checkout/deliveryStep";
+import type { PaymentRoute } from "@/lib/domain/checkout/startPayment";
 import { formatDeliveryDate, formatExpiryBogota, minutesUntil, type WebOrder } from "@/lib/domain/checkout/webOrderResult";
 import { formatCop } from "@/lib/format";
 import { PRIMARY, SECONDARY } from "./formStyles";
@@ -13,6 +14,11 @@ interface Props {
   delivery: DeliveryStep;
   recipientName: string;
   busy: boolean;
+  /** The payment link is being prepared (or the browser is leaving for Mercado Pago). */
+  paying: boolean;
+  /** Why the last payment attempt did not start, or null. */
+  payRoute: PaymentRoute | null;
+  onPay: () => void;
   onEditDelivery: () => void;
   onEditDetails: () => void;
   /** Reserve again after the hold ended. */
@@ -35,7 +41,8 @@ function useNow(intervalMs: number): Date | null {
  * Checkout step 3 (Resumen). READ-ONLY and rendered from the SERVER's answer:
  * order number, lines with unit and total prices, subtotal, delivery fee and
  * grand total are exactly what `create_web_order` priced and reserved. Nothing
- * here is computed from the cart. Payment arrives with slice 5.
+ * here is computed from the cart. "Pagar con Mercado Pago" asks the server for
+ * the Checkout Pro link (slice 5); the server re-reads the order to build it.
  */
 export function SummaryStep({
   order,
@@ -43,6 +50,9 @@ export function SummaryStep({
   delivery,
   recipientName,
   busy,
+  paying,
+  payRoute,
+  onPay,
   onEditDelivery,
   onEditDetails,
   onReserveAgain,
@@ -58,6 +68,8 @@ export function SummaryStep({
   const expired = remaining === 0;
 
   const pickup = delivery.method === "tienda";
+  const locked = busy || paying;
+  const payBlocked = expired || payRoute?.kind === "en_proceso" || payRoute?.kind === "pagado";
 
   return (
     <div className="grid gap-8 lg:grid-cols-[1fr_22rem] lg:items-start lg:gap-10">
@@ -148,10 +160,10 @@ export function SummaryStep({
             </div>
           </dl>
           <div className="mt-4 flex flex-wrap gap-2">
-            <button type="button" className={SECONDARY} onClick={onEditDelivery} disabled={busy}>
+            <button type="button" className={SECONDARY} onClick={onEditDelivery} disabled={locked}>
               Cambiar la entrega
             </button>
-            <button type="button" className={SECONDARY} onClick={onEditDetails} disabled={busy}>
+            <button type="button" className={SECONDARY} onClick={onEditDetails} disabled={locked}>
               Cambiar mis datos
             </button>
           </div>
@@ -181,20 +193,29 @@ export function SummaryStep({
             <dd className="font-display text-2xl tabular-nums text-ink">{formatCop(order.grandTotal)}</dd>
           </div>
         </dl>
-        {/* TODO(slice 5): create the Mercado Pago preference and enable this button.
-            Do not clear the cart here; that happens after payment (slice 6). */}
         <button
           type="button"
-          disabled
-          aria-disabled="true"
+          onClick={onPay}
+          disabled={locked || payBlocked}
+          aria-busy={paying}
           aria-describedby="pay-hint"
-          className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-moss px-8 font-body text-base font-medium text-cream disabled:cursor-not-allowed disabled:opacity-50"
+          className="mt-4 inline-flex min-h-12 w-full items-center justify-center rounded-xl bg-moss px-8 font-body text-base font-medium text-cream transition-colors duration-150 hover:bg-moss-deep motion-reduce:transition-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-moss disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Pagar con Mercado Pago
+          {paying ? "Abriendo Mercado Pago…" : "Pagar con Mercado Pago"}
         </button>
         <p id="pay-hint" className="mt-2 font-body text-xs text-ink-muted">
-          Muy pronto podrás pagar aquí con tarjeta o PSE. Tu pedido queda separado mientras tanto.
+          Pagas con tarjeta o PSE en Mercado Pago. Tu pedido queda confirmado cuando Mercado Pago aprueba el pago.
         </p>
+        {payRoute && (
+          <div role="alert" className="mt-4 rounded-2xl border border-danger/40 bg-danger/5 p-4">
+            <p className="font-body text-sm text-ink">{payRoute.message}</p>
+            {payRoute.kind === "intento" && !expired && (
+              <button type="button" onClick={onReserveAgain} disabled={locked} aria-busy={busy} className={`${PRIMARY} mt-3`}>
+                {busy ? "Reservando…" : "Reservar de nuevo"}
+              </button>
+            )}
+          </div>
+        )}
       </aside>
     </div>
   );

@@ -8,9 +8,11 @@ import { clientIpFromHeaders, createSlidingWindowLimiter } from "@/lib/rateLimit
  *
  * - quote: every call is a Google Distance Matrix request that costs money.
  * - order: every call can reserve stock and consume an order number.
+ * - payment: every call can create a Mercado Pago preference.
  */
 const quoteLimiter = createSlidingWindowLimiter({ limit: 20, windowMs: 60_000 });
 const orderLimiter = createSlidingWindowLimiter({ limit: 8, windowMs: 60_000 });
+const paymentLimiter = createSlidingWindowLimiter({ limit: 10, windowMs: 60_000 });
 
 async function allowed(limiter: typeof quoteLimiter): Promise<boolean> {
   const ip = clientIpFromHeaders(await headers());
@@ -19,3 +21,4 @@ async function allowed(limiter: typeof quoteLimiter): Promise<boolean> {
 
 export const allowQuoteRequest = () => allowed(quoteLimiter);
 export const allowOrderRequest = () => allowed(orderLimiter);
+export const allowPaymentRequest = () => allowed(paymentLimiter);

@@ -12,7 +12,7 @@ contact channel (`lib/whatsapp.ts`).
 
 | Topic | Decision |
 |---|---|
-| Payment webhook | Reuse the **existing n8n Mercado Pago webhook**. Next.js creates the order and the preference; `notification_url` points to n8n, which validates `x-signature`, verifies against the MP API and calls `confirm_order`. One reconciliation pipeline for both channels. |
+| Payment webhook | **Superseded 2026-11-17 (README ADR-0010).** The store has its own webhook (`/api/webhooks/mercadopago`): it validates `x-signature`, verifies against the MP API and calls `confirm_order` (approved) or `set_payment_status` (rejected / in process). `confirm_order` stays the only writer of a paid order for both channels; n8n keeps serving WhatsApp only. |
 | Payment methods | **Card and PSE only.** Cash (Efecty, etc.) is excluded from the preference, which resolves the 30–60 min reservation vs. multi-day cash conflict. |
 | Delivery fee | Google Maps: Places autocomplete in the browser and server-side distance calculation, then `quote_delivery(p_distance_m)`. Same tariff as WhatsApp. |
 | Customer data | The WhatsApp post-payment form (assistant spec 015) is rebuilt **before payment**. A web buyer is anonymous, so there is no channel to ask for it afterwards. |
@@ -49,9 +49,9 @@ Product page ──add──▶ Cart ──▶ 1. Delivery ──▶ 2. Your det
 | 2 | **Delivery step** — `/checkout` step 1; see "Slice 2 detail" | availability re-check of cart lines, delivery calendar, Distance Matrix response parsing, delivery step schema |
 | 3 | **Details step** | form schema (Zod) for the spec 015 fields, conditional invoice fields, phone formats |
 | 4 | **Order creation** (server action + RPC `create_web_order`) | server-side re-pricing, total = subtotal + delivery fee, rejection of tampered or unsellable lines |
-| 5 | **Mercado Pago preference** | preference payload: `external_reference = order_id`, excluded cash payment types, `notification_url` = n8n, back URLs, expiry aligned with the reservation |
+| 5 | **Mercado Pago preference** | preference payload: `external_reference = order_id`, excluded cash payment types, `notification_url` = the store webhook, `metadata.source = 'web'`, back URLs, expiry aligned with the reservation |
 | 6 | **Order detail page** | view model from order + reservations + payment state (`pendiente`, `en_proceso`, `aprobado`, `rechazado`) |
-| 7 | **n8n check** | verify the n8n webhook relies only on `external_reference`; no web-specific branch |
+| 7 | **Store webhook + n8n guard** | signature manifest and constant-time compare, MP payment status → RPC mapping, retry semantics (401 / 500 / 200); n8n ignores `web:` orders |
 
 ## Stock: when it is held
 
@@ -66,8 +66,8 @@ protected in three layers:
    per product before any charge.
 3. **Payment**: the MP preference `date_of_expiration` equals the reservation
    expiry, and `confirm_order` refuses expired reservations or short stock.
-   Residual case: a PSE approved after expiry. n8n must alert the operator
-   (slice 7). `Bajo pedido` lines consume no stock.
+   Residual case: a PSE approved after expiry. The store webhook must alert the
+   operator (slice 7; channel pending, see ADR-0010). `Bajo pedido` lines consume no stock.
 
 ## Slice 2 detail
 

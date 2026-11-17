@@ -16,7 +16,7 @@ WhatsApp, y es lo que permite que ambos canales compartan la infraestructura de 
 3. Mercado Pago devuelve init_point (URL de pago)
 4. El init_point se abre en el checkout web o se envía por WhatsApp
 5. El cliente paga
-6. Mercado Pago notifica al webhook en n8n
+6. Mercado Pago notifica al webhook del canal (tienda: route handler de Next.js; WhatsApp: n8n)
 7. Se verifica contra la API y se actualiza estado_pago
 ```
 
@@ -28,7 +28,9 @@ ella no hay forma de conciliar.
 Esta es el área de mayor riesgo del proyecto: si falla, se cobran ventas que no se registran
 o se registran pedidos duplicados.
 
-1. **Mercado Pago notifica a un webhook en n8n.**
+1. **Cada canal tiene su webhook; `confirm_order` es la única escritura del pago.** La tienda
+   recibe en `/api/webhooks/mercadopago` (Next.js) y WhatsApp en n8n. Ninguno marca pagado por
+   su cuenta: los dos delegan en `confirm_order` (ADR-0010 del README).
 2. **Validar la firma `x-signature`.** Un webhook sin firma válida se rechaza con 401. No se
    procesa "por si acaso".
 3. **Nunca confiar en el cuerpo del webhook ni en la página de retorno.** El cuerpo dice que
@@ -42,8 +44,9 @@ o se registran pedidos duplicados.
 
 Guardar siempre la respuesta completa en `pagos.payload_crudo` para auditoría y depuración.
 
-Responder 200 rápido y procesar en cola (Redis). Un webhook que tarda es un webhook que
-Mercado Pago reintenta.
+Responder rápido. Mercado Pago reintenta si no hay respuesta en 22 s. La tienda procesa en
+línea (consulta + RPC) mientras Redis no esté conectado; si la consulta a la API falla, responde
+500 para que Mercado Pago reenvíe. Un webhook que tarda es un webhook que Mercado Pago reintenta.
 
 ## 3. Métodos de pago y su comportamiento
 

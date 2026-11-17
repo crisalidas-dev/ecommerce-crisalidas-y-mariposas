@@ -14,10 +14,12 @@ import { isMunicipality } from "@/lib/domain/checkout/municipalities";
 import { getFreshStorefrontProducts } from "@/lib/data/storefront-products";
 import { fetchDeliveryFee } from "@/lib/data/delivery-fee";
 import { createGoogleDistanceProvider } from "@/lib/data/google-distance-provider";
-import { callCreateWebOrder } from "@/lib/data/web-order";
-import { allowOrderRequest, allowQuoteRequest } from "@/lib/data/checkout-rate-limit";
+import { callCreateWebOrder, callSetPaymentLink, loadPaymentOrder } from "@/lib/data/web-order";
+import { createMercadoPagoPreference } from "@/lib/data/mercadopago";
+import { allowOrderRequest, allowPaymentRequest, allowQuoteRequest } from "@/lib/data/checkout-rate-limit";
 import type { CreateOrderResult } from "@/lib/domain/checkout/attempt";
 import { createWebOrder } from "@/lib/domain/checkout/createWebOrder";
+import { startPayment, type StartPaymentResult } from "@/lib/domain/checkout/startPayment";
 
 /**
  * Server actions of checkout. They are public POST endpoints: inputs are
@@ -97,5 +99,28 @@ export async function createWebOrderAction(input: unknown): Promise<CreateOrderR
   return createWebOrder(input, {
     distance: createGoogleDistanceProvider(),
     rpc: callCreateWebOrder,
+  });
+}
+
+/**
+ * Turns the open web order into a Mercado Pago Checkout Pro link (slice 5).
+ * Input carries ids only (`orderId`, `attemptId`); the use case re-reads the
+ * order, reuses a still-valid stored link, and otherwise creates and stores a
+ * new preference. It NEVER marks anything as paid: only the store webhook does,
+ * through `confirm_order`, after verifying the payment with Mercado Pago.
+ */
+export async function startPaymentAction(input: unknown): Promise<StartPaymentResult> {
+  if (!(await allowPaymentRequest())) {
+    return {
+      ok: false,
+      route: { kind: "retry", message: "Estás intentando muy seguido. Espera un momento y vuelve a intentarlo." },
+    };
+  }
+  return startPayment(input, {
+    loadOrder: loadPaymentOrder,
+    createPreference: createMercadoPagoPreference,
+    savePaymentLink: callSetPaymentLink,
+    siteUrl: process.env.SITE_URL,
+    now: () => new Date(),
   });
 }

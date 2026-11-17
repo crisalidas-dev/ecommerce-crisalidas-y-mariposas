@@ -181,7 +181,7 @@ El componente fijo de $800 pesa fuerte en el ticket bajo: sobre un ticket de $35
 
 ### Reglas de confirmación de pago
 
-1. Mercado Pago notifica a un **webhook en n8n**.
+1. Mercado Pago notifica al **webhook del canal**: la tienda en Next.js, WhatsApp en n8n. Los dos delegan en `confirm_order`, la única escritura del pago (README, ADR-0010).
 2. **Validar la firma `x-signature`** del webhook.
 3. **Nunca confiar en el cuerpo del webhook ni en la página de retorno.** Consultar la API de Mercado Pago para verificar el estado real antes de marcar el pedido como pagado.
 4. **Idempotencia obligatoria**: enviar `external_reference` con el ID de pedido y verificar si ya fue procesado. Mercado Pago reintenta las notificaciones.

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from "react";
-import { checkCartAvailability, createWebOrderAction } from "@/app/(storefront)/checkout/actions";
+import { checkCartAvailability, createWebOrderAction, startPaymentAction } from "@/app/(storefront)/checkout/actions";
 import { useCart } from "@/components/cart/CartProvider";
 import { SectionLabel } from "@/components/ui/SectionLabel";
 import {
@@ -25,6 +25,7 @@ import {
 } from "@/lib/domain/checkout/saleDetails";
 import { buildOrderRequest, orderRequestSignature } from "@/lib/domain/checkout/webOrderPayload";
 import type { OrderRoute, WebOrder } from "@/lib/domain/checkout/webOrderResult";
+import type { PaymentRoute, StartPaymentResult } from "@/lib/domain/checkout/startPayment";
 import { AvailabilityIssues } from "./AvailabilityIssues";
 import { DeliveryStep } from "./DeliveryStep";
 import { DetailsStep } from "./DetailsStep";
@@ -230,6 +231,59 @@ export function CheckoutFlow({ calendar, calendarFailed, mapsBrowserKey }: Props
     }
   }
 
+  // ---- Payment (slice 5) ---------------------------------------------------------
+  // The server re-reads the order and answers with the Mercado Pago link. The
+  // return page only reads the state; nothing on this side marks the order paid.
+  // The cart is NOT cleared here: that happens once the payment is confirmed.
+  const [paying, setPaying] = useState(false);
+  const payingRef = useRef(false);
+  const [payRoute, setPayRoute] = useState<PaymentRoute | null>(null);
+
+  // Back from Mercado Pago through the browser cache: the button must work again.
+  useEffect(() => {
+    const onPageShow = (event: PageTransitionEvent) => {
+      if (!event.persisted) return;
+      payingRef.current = false;
+      setPaying(false);
+    };
+    window.addEventListener("pageshow", onPageShow);
+    return () => window.removeEventListener("pageshow", onPageShow);
+  }, []);
+
+  async function pay() {
+    if (payingRef.current || submittingRef.current || order === null) return;
+    const attempt = getFlowSnapshot().attempt;
+    payingRef.current = true;
+    setPaying(true);
+    setPayRoute(null);
+
+    let result: StartPaymentResult;
+    try {
+      result = attempt
+        ? await startPaymentAction({ orderId: order.orderId, attemptId: attempt.id })
+        : { ok: false, route: { kind: "intento", message: "Reiniciamos tu pedido para continuar." } };
+    } catch {
+      result = {
+        ok: false,
+        route: { kind: "retry", message: "No pudimos conectar con la tienda. Revisa tu conexión e inténtalo de nuevo." },
+      };
+    }
+
+    if (result.ok) {
+      // Stays "paying" while the browser leaves for Mercado Pago.
+      window.location.assign(result.initPoint);
+      return;
+    }
+    payingRef.current = false;
+    setPaying(false);
+    setPayRoute(result.route);
+  }
+
+  function reserveAgain() {
+    setPayRoute(null);
+    void submit();
+  }
+
   // Reload on the Summary: ask the RPC again with the same attempt. It is
   // idempotent (`reutilizado`), so the customer sees the same order.
   const restoredRef = useRef(false);
@@ -314,9 +368,18 @@ export function CheckoutFlow({ calendar, calendarFailed, mapsBrowserKey }: Props
             delivery={delivery.step}
             recipientName={flow.details.recipient_name.trim()}
             busy={submitting}
-            onEditDelivery={() => updateFlow({ step: 1 })}
-            onEditDetails={() => updateFlow({ step: 2, subPage: 1 })}
-            onReserveAgain={() => void submit()}
+            paying={paying}
+            payRoute={payRoute}
+            onPay={() => void pay()}
+            onEditDelivery={() => {
+              setPayRoute(null);
+              updateFlow({ step: 1 });
+            }}
+            onEditDetails={() => {
+              setPayRoute(null);
+              updateFlow({ step: 2, subPage: 1 });
+            }}
+            onReserveAgain={reserveAgain}
           />
         )}
       </>
