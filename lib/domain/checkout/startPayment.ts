@@ -98,7 +98,7 @@ const UNAVAILABLE: PaymentRoute = {
 // ---- Parsing the rows ------------------------------------------------------------
 
 /** Integer COP from a JSON number or a numeric string ("200000.00"). Fractions are refused. */
-const cop = z
+export const cop = z
   .union([z.number(), z.string().regex(/^\d+(\.0+)?$/).transform(Number)])
   .refine((n) => Number.isSafeInteger(n) && n >= 0);
 
@@ -148,7 +148,7 @@ export type ParsedPaymentOrder =
   | { kind: "malformed" };
 
 /** Option names are only shown in the item title: an unreadable entry is skipped, not fatal. */
-function readOptions(raw: unknown): PayableOption[] {
+export function readOptions(raw: unknown): PayableOption[] {
   if (!Array.isArray(raw)) return [];
   const out: PayableOption[] = [];
   for (const entry of raw) {
@@ -158,7 +158,7 @@ function readOptions(raw: unknown): PayableOption[] {
   return out;
 }
 
-function readLabel(attributes: unknown): string {
+export function readLabel(attributes: unknown): string {
   if (typeof attributes !== "object" || attributes === null || Array.isArray(attributes)) return "";
   return Object.values(attributes)
     .filter((v): v is string => typeof v === "string" && v.trim() !== "")
