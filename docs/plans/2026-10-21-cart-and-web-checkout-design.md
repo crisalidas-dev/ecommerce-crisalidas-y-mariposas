@@ -25,7 +25,7 @@ contact channel (`lib/whatsapp.ts`).
 Product page ──add──▶ Cart ──▶ 1. Delivery ──▶ 2. Your details ──▶ 3. Summary ──▶ Mercado Pago ──▶ Order detail
                                   │                 │                    │                              ▲
                      pickup or delivery     buyer, recipient,   server re-prices,                      │
-                     confirmed address      card message,       reserves stock,               n8n webhook
+                     confirmed address      card message,       reserves stock,             store webhook
                      valid delivery date    invoice             creates preference            confirm_order
 ```
 
@@ -51,7 +51,7 @@ Product page ──add──▶ Cart ──▶ 1. Delivery ──▶ 2. Your det
 | 4 | **Order creation** (server action + RPC `create_web_order`) | server-side re-pricing, total = subtotal + delivery fee, rejection of tampered or unsellable lines |
 | 5 | **Mercado Pago preference** | preference payload: `external_reference = order_id`, excluded cash payment types, `notification_url` = the store webhook, `metadata.source = 'web'`, back URLs, expiry aligned with the reservation |
 | 6 | **Order detail page** | view model from order + reservations + payment state (`pendiente`, `en_proceso`, `aprobado`, `rechazado`) |
-| 7 | **Store webhook + n8n guard** | signature manifest and constant-time compare, MP payment status → RPC mapping, retry semantics (401 / 500 / 200); n8n ignores `web:` orders |
+| 7 | **Store webhook + n8n guard** | signature manifest and constant-time compare, MP payment status → RPC mapping, retry semantics (401 / 500 / 200), refused approved payments recorded with `record_payment_incident`; n8n ignores `web:` orders. **Store webhook done 2026-11-17** (`app/api/webhooks/mercadopago/route.ts`, `lib/domain/checkout/handlePaymentWebhook.ts`); the n8n guard and the panel incidents view (spec 038 T-11) remain |
 
 ## Stock: when it is held
 
@@ -66,8 +66,11 @@ protected in three layers:
    per product before any charge.
 3. **Payment**: the MP preference `date_of_expiration` equals the reservation
    expiry, and `confirm_order` refuses expired reservations or short stock.
-   Residual case: a PSE approved after expiry. The store webhook must alert the
-   operator (slice 7; channel pending, see ADR-0010). `Bajo pedido` lines consume no stock.
+   Residual case: a PSE approved after expiry. `confirm_order` refuses it and the
+   store webhook records it in the shared `payment_incidents` table
+   (`record_payment_incident`, spec 038), which the panel shows as an operator
+   alert; the webhook also logs a `payment_incident_alert` line when the
+   incident is new. `Bajo pedido` lines consume no stock.
 
 ## Slice 2 detail
 
@@ -155,5 +158,5 @@ slice 4 into slice 3.
 
 ## Non-goals
 
-Customer accounts, cash payments, coupons, national shipping, and a Next.js
-payment webhook.
+Customer accounts, cash payments, coupons, national shipping, and refunds
+from the store (`refunded` / `charged_back` are logged only).

@@ -294,7 +294,9 @@ export async function startPayment(raw: unknown, deps: StartPaymentDeps): Promis
         return fail(NOT_AVAILABLE);
       case "invalid_amount":
       case "total_mismatch":
-        // TODO(decisión): alert the operator (channel pending, README ADR-0010).
+        // Nothing was charged, so this is not a payment incident (`payment_incidents`
+        // only records approved payments, README ADR-0010).
+        // TODO(decisión): whether an order that cannot be charged also raises a panel alert.
         console.error(`startPayment: order ${orderId} not chargeable (${built.error})`);
         return fail(UNAVAILABLE);
     }
@@ -307,7 +309,13 @@ export async function startPayment(raw: unknown, deps: StartPaymentDeps): Promis
   } catch {
     return fail(MP_DOWN);
   }
-  if (!created.ok) return fail(created.error === "not_configured" ? NOT_AVAILABLE : MP_DOWN);
+  if (!created.ok) {
+    if (created.error === "not_configured") {
+      console.error("startPayment: MP_ACCESS_TOKEN is not set; web payments are disabled");
+      return fail(NOT_AVAILABLE);
+    }
+    return fail(MP_DOWN);
+  }
 
   // 8. Store it. A link the database refused is never handed out: the order may
   //    have closed meanwhile, and paying a closed order charges money without a sale.

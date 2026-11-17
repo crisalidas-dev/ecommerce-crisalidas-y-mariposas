@@ -233,6 +233,15 @@ describe("startPayment: dependencies failing", () => {
     assert.equal((await startPayment(INPUT, d)).ok, false);
   });
 
+  it("logs a clear operator line, without secrets, when MP_ACCESS_TOKEN is missing", async (t) => {
+    const logged = t.mock.method(console, "error", () => {});
+    const { deps: d } = deps({ createPreference: async () => ({ ok: false, error: "not_configured" }) });
+    const r = await startPayment(INPUT, d);
+    assert.equal(!r.ok && r.route.kind, "retry");
+    const lines = logged.mock.calls.map((c) => String(c.arguments[0]));
+    assert.ok(lines.some((l) => l.includes("MP_ACCESS_TOKEN")), lines.join("\n"));
+  });
+
   it("asks to retry when SITE_URL is not configured", async () => {
     const { deps: d, calls } = deps({ siteUrl: undefined });
     const r = await startPayment(INPUT, d);

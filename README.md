@@ -106,7 +106,7 @@ Las siguientes decisiones se toman en el código y en `docs/plans/`, pero todav�
 
 - **Decisión:** reglas de negocio (vendibilidad, carrito, estados, calendario de entrega, SKUs, sesiones) como funciones puras con dependencias inyectadas (reloj, `DistanceProvider`). Probadas con `node --test` y el soporte nativo de TypeScript de Node, sin framework de pruebas.
 - **Contexto:** lo que cuesta dinero si falla (totales, stock, transiciones) no debe depender de la UI ni de la red para probarse.
-- **Consecuencias:** 878 pruebas corren en unos 2 segundos. Las importaciones dentro de `lib/domain` usan extensión `.ts` para que Node las resuelva. Los adaptadores (`lib/data/*`, `google-distance-provider.ts`) no tienen pruebas unitarias.
+- **Consecuencias:** 1044 pruebas corren en unos 2 segundos. Las importaciones dentro de `lib/domain` usan extensión `.ts` para que Node las resuelva. Los adaptadores (`lib/data/*`, `google-distance-provider.ts`) no tienen pruebas unitarias.
 
 #### ADR-0010: La tienda confirma sus pagos con su propio webhook; `confirm_order` es la única escritura del pago
 
@@ -114,11 +114,12 @@ Las siguientes decisiones se toman en el código y en `docs/plans/`, pero todav�
 
 - **Decisión:**
   - Next.js crea el pedido y la preferencia de Checkout Pro con `external_reference = order.id`, `metadata.source = 'web'` y `notification_url` apuntando a su propio route handler (`/api/webhooks/mercadopago`). Solo tarjeta y PSE.
-  - El handler valida `x-signature`: HMAC-SHA256 del manifiesto `id:<data.id en minúsculas>;request-id:<x-request-id>;ts:<ts>;`, comparado en tiempo constante.
-  - Después consulta `GET /v1/payments/{id}` y decide **solo** con esa respuesta:
-    - `approved` → `confirm_order`
+  - El handler valida `x-signature`: HMAC-SHA256 del manifiesto `id:<data.id en minúsculas>;request-id:<x-request-id>;ts:<ts>;`, comparado en tiempo constante. `data.id` sale del query string; una parte ausente se omite del manifiesto.
+  - Después consulta `GET /v1/payments/{id}` y decide **solo** con esa respuesta, si `metadata.source = 'web'` (si no, 200 sin tocar nada: es de WhatsApp):
+    - `approved` → `confirm_order`. Si lo rechaza (salvo `mismo_pago: true`, que es un reintento) → `record_payment_incident`
     - `rejected` / `cancelled` → `set_payment_status('rechazado')`
-    - `pending` / `in_process` → `set_payment_status('en_proceso')`
+    - `pending` / `in_process` / `authorized` → `set_payment_status('en_proceso')`
+    - `refunded` / `charged_back` / otro → solo log: aún no hay RPC de reembolsos
   - **`confirm_order` es la única función que deja un pedido pagado**, para los dos canales: descuenta stock, valida el monto y es idempotente por `payment_ref`. `set_payment_status` solo registra estados intermedios y nunca aprueba.
 - **Contexto:**
   - La tienda no puede depender de que el asistente de WhatsApp esté arriba para confirmar ventas: el 2026-11-17 n8n estaba apagado.
@@ -131,8 +132,10 @@ Las siguientes decisiones se toman en el código y en `docs/plans/`, pero todav�
   - **Sin cola por ahora.** Se procesa en línea: la consulta y la RPC tardan muy por debajo de los 22 s que espera Mercado Pago. Si falla la consulta, se responde 500 para que Mercado Pago reenvíe el aviso. Los reintentos los absorbe `confirm_order`. Cuando Redis esté conectado se puede encolar sin cambiar el contrato.
   - **La página de retorno (`back_urls`) solo lee el estado.** Nunca confirma un pago.
   - **n8n debe ignorar los pedidos `web:`** por si el webhook configurado en el panel de Mercado Pago también le avisa de pagos web. Si alguno se cuela, el resultado sigue siendo correcto porque `confirm_order` es idempotente; solo sobran los efectos secundarios, como intentar escribirle por WhatsApp a un `chat_id` web.
-  - **`TODO(decisión)`: avisos al operador** de venta web confirmada y de dinero cobrado sin pedido confirmado (doble cobro, reserva vencida, monto que no cuadra, PSE aprobado tras vencer la reserva). En WhatsApp los envía n8n por Gmail; para la tienda aún no hay canal definido.
-  - **Nuevas variables:** `MP_ACCESS_TOKEN` y `MP_WEBHOOK_SECRET`. El servicio de Next.js en Railway no puede dormir.
+  - **Avisos al operador (resuelto el 2026-11-17):** el dinero cobrado sin pedido confirmado (doble cobro, reserva vencida, monto que no cuadra, PSE aprobado tras vencer la reserva) queda en la tabla compartida `payment_incidents` (spec 038 del repo del asistente, aplicada el 2026-11-17). La escriben los dos canales con `record_payment_incident`, idempotente por `mp_payment_id`, y el operador la ve y la resuelve como alerta del panel (vista pendiente, T-11). La tienda además deja una línea `payment_incident_alert` en el log cuando el incidente es nuevo o no se pudo registrar, sin datos del cliente.
+  - **Códigos HTTP:** 401 firma ausente o inválida; 500 todo lo transitorio (falta el secreto o el token, la consulta a Mercado Pago falla, la base no responde), para que Mercado Pago reenvíe; 200 todo lo decidido, incluidos los rechazos de negocio y los temas que no son `payment`.
+  - **Estado (slice 7):** el webhook de la tienda está implementado (`app/api/webhooks/mercadopago/route.ts`, dominio en `lib/domain/checkout/handlePaymentWebhook.ts`). Falta la guarda de n8n para pedidos `web:` y la vista de incidentes del panel.
+  - **Nuevas variables:** `MP_ACCESS_TOKEN` y `MP_WEBHOOK_SECRET` (la «clave secreta» de *Webhooks > Configurar notificaciones* de la aplicación de Mercado Pago). El servicio de Next.js en Railway no puede dormir.
   - Diseño del checkout en [`docs/plans/2026-10-21-cart-and-web-checkout-design.md`](docs/plans/2026-10-21-cart-and-web-checkout-design.md).
 
 #### ADR-0011: El stock se retiene al crear el pedido, no al agregar al carrito
@@ -178,6 +181,7 @@ Las siguientes decisiones se toman en el código y en `docs/plans/`, pero todav�
 - Carrito persistido en el navegador, con drawer y píldora flotante.
 - Checkout paso 1, Entrega: recogida en tienda o domicilio en el área metropolitana, distancia por Google Distance Matrix, tarifa por `quote_delivery` en la base, confirmación en mapa estático y calendario sin domingos ni festivos.
 - Checkout paso 2, Tus datos: comprador, quien recibe, tarjeta y facturación, con creación del pedido pendiente vía `create_web_order`.
+- Checkout paso 3 y pago: resumen con totales del servidor y preferencia de Checkout Pro (tarjeta y PSE). Página pública del pedido (`/pedido/[id]`, solo lee el estado, sin datos personales) y comprobante de pago en PDF (`/pedido/[id]/comprobante`, solo pedidos pagados).
 - Florea como sección informativa con enlace a su sitio externo. Jagua como presentación institucional.
 - Páginas legales (términos, política de datos) y `about-us`.
 
@@ -201,7 +205,7 @@ Las siguientes decisiones se toman en el código y en `docs/plans/`, pero todav�
 
 ### Extensiones futuras
 
-- **Checkout, slices 6 y 7:** página pública del pedido (`/pedido/[id]`) con comprobante en PDF, webhook propio de la tienda y que n8n ignore los pedidos `web:` (ADR-0010). El slice 5 (preferencia de Mercado Pago) ya está implementado.
+- **Checkout, slice 7 (resto):** que n8n ignore los pedidos `web:` y la vista del panel para `payment_incidents` (ADR-0010). El webhook propio de la tienda ya confirma los pagos web.
 - **Roles del panel:** hoy cualquier usuario autenticado puede todo (`TODO(roles)`). El modelo `admin` / `ventas` / `inventario` / `produccion` del contexto de negocio no está implementado.
 - **Rate limiting en Redis** cuando haya más de una réplica.
 - **Productos con agenda** (`requiere_agenda`, experiencias de liberación): ni el esquema ni `Producto` lo modelan todavía.
@@ -307,7 +311,6 @@ sequenceDiagram
     Note over DB: Una transaccion: re-precia, reserve_variant por linea (60 min), set_delivery, sale_details
     DB-->>SA: Pedido abierto, payment_status pendiente
     SA-->>Tienda: Resumen con totales del servidor
-    Note over SA,MP: Pendiente (slices 5 a 7)
     SA->>MP: Crear preferencia (external_reference = order_id)
     Cliente->>MP: Paga con tarjeta o PSE
     MP->>SA: Webhook /api/webhooks/mercadopago
@@ -369,7 +372,7 @@ Todas son de servidor salvo la que lleva `NEXT_PUBLIC_`. Se definen en `.env.loc
 | `GOOGLE_MAPS_SERVER_KEY` | No | Distance Matrix para el domicilio. Sin ella el checkout no cotiza, pero no se rompe | `AIza...` |
 | `NEXT_PUBLIC_GOOGLE_MAPS_BROWSER_KEY` | No | Static Maps para confirmar la dirección. Pública: restringir por referrer | `AIza...` |
 | `MP_ACCESS_TOKEN` | Para cobrar | **Secreta.** Access token de la aplicación de Mercado Pago (TEST en sandbox). Crea preferencias y consulta pagos | `APP_USR-...` / `TEST-...` |
-| `MP_WEBHOOK_SECRET` | Para cobrar | **Secreta.** Clave de firma de Webhooks de la aplicación (la misma que usa n8n). Valida `x-signature` | 64 caracteres hex |
+| `MP_WEBHOOK_SECRET` | Para cobrar | **Secreta.** «Clave secreta» de *Webhooks > Configurar notificaciones* de la aplicación de Mercado Pago (la misma que usa n8n). Valida `x-signature`; sin ella el webhook responde 500 | 64 caracteres hex |
 | `SITE_URL` | Para cobrar | URL pública de la tienda. Arma `back_urls` y `notification_url` de la preferencia | `https://tienda.nacergroup.co` |
 
 El número de WhatsApp del header no es variable de entorno: es `WHATSAPP_NUMBER` en `lib/config.ts`, hoy con un placeholder (`TODO(cliente)`).

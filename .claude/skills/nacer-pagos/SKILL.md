@@ -48,6 +48,13 @@ Responder rápido. Mercado Pago reintenta si no hay respuesta en 22 s. La tienda
 línea (consulta + RPC) mientras Redis no esté conectado; si la consulta a la API falla, responde
 500 para que Mercado Pago reenvíe. Un webhook que tarda es un webhook que Mercado Pago reintenta.
 
+**Dinero cobrado sin pedido confirmado → incidente, no correo suelto.** Si Mercado Pago dice
+`approved` y `confirm_order` rechaza (salvo `mismo_pago: true`, que es un reintento), el webhook
+llama `record_payment_incident` con el rechazo tal cual. La tabla `payment_incidents` (spec 038
+del repo del asistente, aplicada el 2026-11-17) es compartida por web y WhatsApp, deduplica por
+`mp_payment_id` y es la alerta del operador en el panel. Avisar solo con `nuevo: true`; si el
+registro falla, avisar igual. Ese era el `TODO(decisión)` del canal de avisos: ya está resuelto.
+
 ## 3. Métodos de pago y su comportamiento
 
 Habilitar todos los de Mercado Pago Colombia. **El tiempo hasta la confirmación cambia la
