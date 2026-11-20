@@ -7,12 +7,12 @@ export default function Loading() {
       title="Configuración"
       subtitle={
         <p className="text-sm text-admin-ink-muted">
-          Datos del negocio que cita el asistente de WhatsApp, horario de atención y festivos.
+          Datos del negocio, catálogo en PDF, horario de atención y festivos.
         </p>
       }
     >
-      <div className="grid grid-cols-1 gap-6 md:grid-cols-2">
-        {[0, 1, 2, 3].map((i) => (
+      <div className="flex flex-col gap-6">
+        {[0, 1].map((i) => (
           <div key={i} className={`${SKELETON_SURFACE} flex flex-col gap-3 p-4`}>
             <SkeletonBar className="h-5 w-40" />
             <SkeletonBar className="h-11 w-full" />

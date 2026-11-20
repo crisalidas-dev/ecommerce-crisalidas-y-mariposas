@@ -19,6 +19,7 @@ import { mapHolidayDbError, parseHolidayInput } from "@/lib/domain/holidays";
 import { bogotaDate } from "@/lib/domain/checkout/deliveryCalendar";
 
 const PATH = "/admin/configuracion";
+const HOURS_PATH = "/admin/configuracion/horario";
 
 export type SettingsFormState = {
   error: string | null;
@@ -72,7 +73,7 @@ export async function saveBusinessHours(schedule: unknown): Promise<HoursResult>
       fieldErrors: {},
     };
   }
-  revalidatePath(PATH);
+  revalidatePath(HOURS_PATH);
   return { ok: true };
 }
 
@@ -95,7 +96,7 @@ export async function addHoliday(_prev: HolidayFormState, formData: FormData): P
 
   const dbError = await insertHoliday(parsed.data);
   if (dbError) return { error: mapHolidayDbError(dbError), fieldErrors: {} };
-  revalidatePath(PATH);
+  revalidatePath(HOURS_PATH);
   return { error: null, fieldErrors: {}, added: true };
 }
 
@@ -107,6 +108,6 @@ export async function removeHoliday(date: string): Promise<{ ok: true } | { ok: 
 
   const dbError = await deleteHoliday(date);
   if (dbError) return { ok: false, error: mapHolidayDbError(dbError) };
-  revalidatePath(PATH);
+  revalidatePath(HOURS_PATH);
   return { ok: true };
 }
