@@ -15,6 +15,13 @@ import {
   toBusinessSettingsUpdate,
   type BusinessSettingsField,
 } from "@/lib/domain/businessSettings";
+import { updatePaymentInfo } from "@/lib/data/payment-info";
+import {
+  mapPaymentInfoDbError,
+  parsePaymentInfoInput,
+  toPaymentInfoUpdate,
+  type PaymentInfoField,
+} from "@/lib/domain/paymentInfo";
 import { mapHolidayDbError, parseHolidayInput } from "@/lib/domain/holidays";
 import { bogotaDate } from "@/lib/domain/checkout/deliveryCalendar";
 
@@ -48,6 +55,29 @@ export async function saveBusinessSettings(
       fieldErrors: mapped.field ? { [mapped.field]: mapped.error } : {},
     };
   }
+  revalidatePath(PATH);
+  return { error: null, fieldErrors: {}, saved: true };
+}
+
+export type PaymentInfoFormState = {
+  error: string | null;
+  fieldErrors: Partial<Record<PaymentInfoField, string>>;
+  saved?: boolean;
+};
+
+/** Writes `payment_info` text columns (UPDATE of id = 1; never insert/upsert). `qr_url` is owned by the QR upload. */
+export async function savePaymentInfo(
+  _prev: PaymentInfoFormState,
+  formData: FormData,
+): Promise<PaymentInfoFormState> {
+  const guard = await requireSettingsEditor();
+  if (!guard.ok) return { error: guard.error, fieldErrors: {} };
+
+  const parsed = parsePaymentInfoInput(Object.fromEntries(formData));
+  if (!parsed.ok) return { error: "Revisa los campos marcados.", fieldErrors: parsed.errors };
+
+  const dbError = await updatePaymentInfo(toPaymentInfoUpdate(parsed.data));
+  if (dbError) return { error: mapPaymentInfoDbError(dbError).error, fieldErrors: {} };
   revalidatePath(PATH);
   return { error: null, fieldErrors: {}, saved: true };
 }

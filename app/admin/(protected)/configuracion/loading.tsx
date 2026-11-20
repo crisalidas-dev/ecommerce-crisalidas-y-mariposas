@@ -7,7 +7,7 @@ export default function Loading() {
       title="Configuración"
       subtitle={
         <p className="text-sm text-admin-ink-muted">
-          Datos del negocio, catálogo en PDF, horario de atención y festivos.
+          Datos del negocio, datos de pago, catálogo en PDF, horario de atención y festivos.
         </p>
       }
     >
