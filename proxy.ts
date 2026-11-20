@@ -78,5 +78,11 @@ function withoutAppSession(response: NextResponse, request: NextRequest) {
 export const config = {
   // Cubre /admin y todo lo que cuelga de él (incluido /admin/login, que el
   // propio proxy deja pasar). Las rutas de la tienda quedan fuera a propósito.
-  matcher: ["/admin/:path*"],
+  //
+  // Excepción: /admin/api/catalogo-pdf. Con proxy, Next guarda en memoria el
+  // cuerpo de la petición hasta `proxyClientMaxBodySize` (10 MB por defecto) y
+  // trunca en silencio el resto, así que el PDF del catálogo (hasta 40 MB)
+  // llegaría cortado. La ruta verifica la sesión completa por su cuenta
+  // (`requireSettingsEditor` → `requireAdminSession`). Ver lib/admin/proxyMatcher.test.ts.
+  matcher: ["/admin", "/admin/((?!api/catalogo-pdf$).*)"],
 };

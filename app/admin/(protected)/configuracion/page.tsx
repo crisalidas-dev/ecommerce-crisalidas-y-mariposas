@@ -4,7 +4,9 @@ import {
   getUpcomingHolidays,
   getWeekSchedule,
 } from "@/lib/data/business-settings";
+import { getCatalogInfo } from "@/lib/admin/catalogPdfStorage";
 import { bogotaDate } from "@/lib/domain/checkout/deliveryCalendar";
+import { CatalogPdfForm } from "./CatalogPdfForm";
 import { BusinessHoursForm } from "./BusinessHoursForm";
 import { BusinessSettingsForm } from "./BusinessSettingsForm";
 import { HolidaysManager } from "./HolidaysManager";
@@ -14,10 +16,11 @@ export const dynamic = "force-dynamic";
 
 export default async function ConfiguracionPage() {
   const today = bogotaDate(new Date());
-  const [settings, week, holidays] = await Promise.all([
+  const [settings, week, holidays, catalog] = await Promise.all([
     getBusinessSettings(),
     getWeekSchedule(),
     getUpcomingHolidays(today),
+    getCatalogInfo(),
   ]);
 
   return (
@@ -25,7 +28,7 @@ export default async function ConfiguracionPage() {
       <div>
         <h1 className="text-xl font-bold tracking-tight text-admin-ink">Configuración</h1>
         <p className="text-sm text-admin-ink-muted">
-          Datos del negocio que cita el asistente de WhatsApp, horario de atención y festivos.
+          Datos del negocio que cita el asistente de WhatsApp, horario de atención, festivos y catálogo en PDF.
         </p>
       </div>
 
@@ -55,6 +58,16 @@ export default async function ConfiguracionPage() {
         </h2>
         <p className="text-sm text-admin-ink-muted">Cada festivo cierra el día completo. Se listan desde hoy.</p>
         <HolidaysManager holidays={holidays} today={today} />
+      </section>
+
+      <section aria-labelledby="sec-catalogo" className="flex flex-col gap-3">
+        <h2 id="sec-catalogo" className="text-base font-semibold text-admin-ink">
+          Catálogo en PDF
+        </h2>
+        <p className="text-sm text-admin-ink-muted">
+          Archivo que el asistente de WhatsApp envía a los clientes. Al subir uno nuevo se reemplaza el actual.
+        </p>
+        <CatalogPdfForm publicUrl={catalog.publicUrl} file={catalog.file} />
       </section>
     </div>
   );
